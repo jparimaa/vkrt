@@ -36,80 +36,98 @@ size_t getAccessorElementSizeInBytes(const tinygltf::Accessor& accessor)
     return componentTypeSize * typeCount;
 }
 
-std::vector<Model::Vertex> loadVertices(const tinygltf::Model& model)
+int getSourceOrMinusOne(const std::vector<tinygltf::Texture>& textures, int index)
 {
-    std::vector<Model::Vertex> vertices;
-    for (const auto& [attributeName, attributeIndex] : model.meshes[0].primitives[0].attributes)
+    if (index < 0)
     {
-        const tinygltf::Accessor& accessor = model.accessors[attributeIndex];
-        const tinygltf::BufferView& bufferView = model.bufferViews[accessor.bufferView];
-        const tinygltf::Buffer& buffer = model.buffers[bufferView.buffer];
+        return -1;
+    }
+    return textures[index].source;
+}
 
-        if (vertices.empty())
+std::vector<Model::Primitive> loadPrimitives(const tinygltf::Model& model)
+{
+    std::vector<Model::Primitive> primitives(model.meshes[0].primitives.size());
+    for (size_t i = 0; i < model.meshes[0].primitives.size(); ++i)
+    {
+        const tinygltf::Primitive& gltfPrimitive = model.meshes[0].primitives[i];
+
+        { // Indices
+            const tinygltf::Accessor& accessor = model.accessors[gltfPrimitive.indices];
+            const tinygltf::BufferView& bufferView = model.bufferViews[accessor.bufferView];
+            const tinygltf::Buffer& buffer = model.buffers[bufferView.buffer];
+
+            std::vector<uint32_t>& indices = primitives[i].indices;
+            indices.resize(accessor.count);
+
+            const size_t elementSizeInBytes = getAccessorElementSizeInBytes(accessor);
+            const size_t indexOffset = bufferView.byteOffset + accessor.byteOffset;
+            const unsigned char* bufferPtr = &buffer.data[indexOffset];
+            unsigned short indexValue = 0;
+            const size_t lastIndex = indexOffset + bufferView.byteLength - 1;
+
+            for (size_t i = 0; i < accessor.count; ++i)
+            {
+                CHECK(bufferPtr < &buffer.data[lastIndex]);
+                std::memcpy(&indexValue, bufferPtr, sizeof(unsigned short));
+                indices[i] = indexValue;
+                bufferPtr += bufferView.byteStride + elementSizeInBytes;
+            }
+        }
+
+        // Vertices
+        for (const auto& [attributeName, attributeIndex] : gltfPrimitive.attributes)
         {
+            const tinygltf::Accessor& accessor = model.accessors[attributeIndex];
+            const tinygltf::BufferView& bufferView = model.bufferViews[accessor.bufferView];
+            const tinygltf::Buffer& buffer = model.buffers[bufferView.buffer];
+
+            std::vector<Model::Vertex>& vertices = primitives[i].vertices;
             vertices.resize(accessor.count);
-        }
-        CHECK(vertices.size() == accessor.count);
 
-        const size_t elementSizeInBytes = getAccessorElementSizeInBytes(accessor);
-        const size_t offset = bufferView.byteOffset + accessor.byteOffset;
-        const unsigned char* bufferPtr = &buffer.data[offset];
-        for (size_t i = 0; i < accessor.count; ++i)
-        {
-            CHECK(bufferPtr < &buffer.data[offset + bufferView.byteLength]);
-            if (attributeName == "POSITION")
+            const size_t elementSizeInBytes = getAccessorElementSizeInBytes(accessor);
+            const size_t offset = bufferView.byteOffset + accessor.byteOffset;
+            const unsigned char* bufferPtr = &buffer.data[offset];
+            const size_t lastIndex = offset + bufferView.byteLength - 1;
+
+            for (size_t accessorIndex = 0; accessorIndex < accessor.count; ++accessorIndex)
             {
-                std::memcpy(&vertices[i].position, bufferPtr, elementSizeInBytes);
+                CHECK(bufferPtr < &buffer.data[lastIndex]);
+
+                if (attributeName == "POSITION")
+                {
+                    std::memcpy(&vertices[accessorIndex].position, bufferPtr, elementSizeInBytes);
+                }
+                else if (attributeName == "NORMAL")
+                {
+                    std::memcpy(&vertices[accessorIndex].normal, bufferPtr, elementSizeInBytes);
+                }
+                else if (attributeName == "TEXCOORD_0")
+                {
+                    std::memcpy(&vertices[accessorIndex].uv, bufferPtr, elementSizeInBytes);
+                }
+                else if (attributeName == "TANGENT")
+                {
+                    std::memcpy(&vertices[accessorIndex].tangent, bufferPtr, elementSizeInBytes);
+                }
+                bufferPtr += bufferView.byteStride;
             }
-            else if (attributeName == "NORMAL")
-            {
-                std::memcpy(&vertices[i].normal, bufferPtr, elementSizeInBytes);
-            }
-            else if (attributeName == "TEXCOORD_0")
-            {
-                std::memcpy(&vertices[i].uv, bufferPtr, elementSizeInBytes);
-            }
-            bufferPtr += elementSizeInBytes + bufferView.byteStride;
         }
     }
-    return vertices;
+    return primitives;
 }
 
-std::vector<uint32_t> loadIndices(const tinygltf::Model& model)
+std::vector<Model::Material> loadMaterials(const tinygltf::Model& gltfModel)
 {
-    std::vector<uint32_t> indices;
+    std::vector<Model::Material> materials(gltfModel.materials.size());
+    const std::vector<tinygltf::Texture>& t = gltfModel.textures;
 
-    const tinygltf::Accessor& indicesAccessor = model.accessors[model.meshes[0].primitives[0].indices];
-    const tinygltf::BufferView& indexBufferView = model.bufferViews[indicesAccessor.bufferView];
-    const tinygltf::Buffer& indexBuffer = model.buffers[indexBufferView.buffer];
-    indices.resize(indicesAccessor.count);
-
-    const size_t indexOffset = indexBufferView.byteOffset + indicesAccessor.byteOffset;
-    const unsigned char* indexBufferPtr = &indexBuffer.data[indexOffset];
-    unsigned short indexValue = 0;
-    for (size_t i = 0; i < indicesAccessor.count; ++i)
+    for (size_t i = 0; i < gltfModel.materials.size(); ++i)
     {
-        CHECK(indexBufferPtr < &indexBuffer.data[indexOffset + indexBufferView.byteLength]);
-        std::memcpy(&indexValue, indexBufferPtr, sizeof(unsigned short));
-        indices[i] = indexValue;
-        indexBufferPtr += indexBufferView.byteStride + sizeof(unsigned short);
-    }
-
-    return indices;
-}
-
-std::vector<Model::Material> loadMaterials(const tinygltf::Model& model)
-{
-    std::vector<Model::Material> materials(model.materials.size());
-
-    for (size_t i = 0; i < model.materials.size(); ++i)
-    {
-        const tinygltf::Material& m = model.materials[i];
-        materials[i].baseColor = model.textures[m.pbrMetallicRoughness.baseColorTexture.index].source;
-        materials[i].metallicRoughnessImage = model.textures[m.pbrMetallicRoughness.metallicRoughnessTexture.index].source;
-        materials[i].normalImage = model.textures[m.normalTexture.index].source;
-        materials[i].emissiveImage = model.textures[m.emissiveTexture.index].source;
-        materials[i].occlusionImage = model.textures[m.occlusionTexture.index].source;
+        const tinygltf::Material& m = gltfModel.materials[i];
+        materials[i].baseColor = getSourceOrMinusOne(t, m.pbrMetallicRoughness.baseColorTexture.index);
+        materials[i].metallicRoughnessImage = getSourceOrMinusOne(t, m.pbrMetallicRoughness.metallicRoughnessTexture.index);
+        materials[i].normalImage = getSourceOrMinusOne(t, m.normalTexture.index);
     }
 
     return materials;
@@ -133,14 +151,14 @@ std::vector<Model::Image> loadImages(tinygltf::Model& model)
 
 Model::Model(const std::string& filename)
 {
-    tinygltf::Model model;
+    tinygltf::Model gltfModel;
     tinygltf::TinyGLTF loader;
     std::string errorMessage;
     std::string warningMessage;
 
     const std::string filepath = c_modelsFolder + filename;
     printf("Loading model %s... ", filepath.c_str());
-    const bool modelLoaded = loader.LoadBinaryFromFile(&model, &errorMessage, &warningMessage, filepath);
+    const bool modelLoaded = loader.LoadASCIIFromFile(&gltfModel, &errorMessage, &warningMessage, filepath);
 
     if (!warningMessage.empty())
     {
@@ -155,12 +173,11 @@ Model::Model(const std::string& filename)
     }
 
     CHECK(modelLoaded);
-    CHECK(!model.meshes.empty());
+    CHECK(!gltfModel.meshes.empty());
 
-    vertices = loadVertices(model);
-    indices = loadIndices(model);
-    materials = loadMaterials(model);
-    images = loadImages(model);
+    primitives = loadPrimitives(gltfModel);
+    materials = loadMaterials(gltfModel);
+    images = loadImages(gltfModel);
 
     printf("Completed\n");
 }

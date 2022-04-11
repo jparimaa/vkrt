@@ -193,7 +193,7 @@ bool Renderer::update(uint32_t imageIndex)
 
 void Renderer::loadModel()
 {
-    m_model.reset(new Model("DamagedHelmet.glb"));
+    m_model.reset(new Model("sponza/Sponza.gltf"));
     m_numIndices = m_model->indices.size();
 }
 
@@ -459,7 +459,7 @@ void Renderer::createTextures()
     const VkPhysicalDevice physicalDevice = m_context.getPhysicalDevice();
     const VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
     const Model::Material& mat = m_model->materials[0];
-    const std::vector<int> imageIndices{mat.baseColor, mat.metallicRoughnessImage, mat.normalImage, mat.emissiveImage, mat.occlusionImage};
+    const std::vector<int> imageIndices{mat.baseColor, mat.metallicRoughnessImage, mat.normalImage};
 
     for (size_t i = 0; i < imageIndices.size(); ++i)
     {
