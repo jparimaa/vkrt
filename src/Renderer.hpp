@@ -18,6 +18,13 @@ public:
     bool render();
 
 private:
+    struct PrimitiveInfo
+    {
+        int32_t vertexCountOffset{0};
+        VkDeviceSize indexOffset{0};
+        uint32_t indexCount;
+    };
+
     bool update(uint32_t imageIndex);
 
     void loadModel();
@@ -38,7 +45,7 @@ private:
     void createTextureDescriptorSet();
     void createUniformBuffer();
     void updateUboDescriptorSets();
-    void updateTexturesDescriptorSet();
+    void updateTexturesDescriptorSets();
     void createVertexAndIndexBuffer();
     void allocateCommandBuffers();
     void initializeGUI();
@@ -66,13 +73,12 @@ private:
     VkPipeline m_graphicsPipeline;
     VkDescriptorPool m_descriptorPool;
     std::vector<VkDescriptorSet> m_uboDescriptorSets;
-    VkDescriptorSet m_texturesDescriptorSet;
+    std::vector<VkDescriptorSet> m_texturesDescriptorSets;
     VkBuffer m_uniformBuffer;
     VkDeviceMemory m_uniformBufferMemory;
-    VkDeviceSize m_offsetToIndexData;
     VkBuffer m_attributeBuffer;
     VkDeviceMemory m_attributeBufferMemory;
-    size_t m_numIndices;
+    std::vector<PrimitiveInfo> m_primitiveInfos;
     std::vector<VkCommandBuffer> m_commandBuffers;
     std::unique_ptr<GUI> m_gui;
 };

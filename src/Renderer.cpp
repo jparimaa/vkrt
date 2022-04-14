@@ -7,6 +7,8 @@
 #include <GLFW/glfw3.h>
 #include <array>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/transform.hpp>
+
 namespace
 {
 const size_t c_uniformBufferSize = sizeof(glm::mat4);
@@ -36,7 +38,7 @@ Renderer::Renderer(Context& context) :
     createTextureDescriptorSet();
     createUniformBuffer();
     updateUboDescriptorSets();
-    updateTexturesDescriptorSet();
+    updateTexturesDescriptorSets();
     createVertexAndIndexBuffer();
     allocateCommandBuffers();
     releaseModel();
@@ -139,10 +141,14 @@ bool Renderer::render()
 
         VkDeviceSize offsets[] = {0};
         vkCmdBindVertexBuffers(cb, 0, 1, &m_attributeBuffer, offsets);
-        vkCmdBindIndexBuffer(cb, m_attributeBuffer, m_offsetToIndexData, VK_INDEX_TYPE_UINT32);
-        const std::vector<VkDescriptorSet> descriptorSets{m_uboDescriptorSets[imageIndex], m_texturesDescriptorSet};
-        vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0, ui32Size(descriptorSets), descriptorSets.data(), 0, nullptr);
-        vkCmdDrawIndexed(cb, m_numIndices, 1, 0, 0, 0);
+        for (size_t i = 0; i < m_primitiveInfos.size(); ++i)
+        {
+            const PrimitiveInfo& primitiveInfo = m_primitiveInfos[i];
+            vkCmdBindIndexBuffer(cb, m_attributeBuffer, primitiveInfo.indexOffset, VK_INDEX_TYPE_UINT32);
+            const std::vector<VkDescriptorSet> descriptorSets{m_uboDescriptorSets[imageIndex], m_texturesDescriptorSets[0]};
+            vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0, ui32Size(descriptorSets), descriptorSets.data(), 0, nullptr);
+            vkCmdDrawIndexed(cb, primitiveInfo.indexCount, 1, 0, primitiveInfo.vertexCountOffset, 0);
+        }
 
         vkCmdEndRenderPass(cb);
 
@@ -184,7 +190,8 @@ bool Renderer::update(uint32_t imageIndex)
 
     void* dst;
     VK_CHECK(vkMapMemory(m_device, m_uniformBufferMemory, imageIndex * c_uniformBufferSize, c_uniformBufferSize, 0, &dst));
-    const glm::mat4 viewProjectionMatrix = m_camera.getProjectionMatrix() * m_camera.getViewMatrix();
+    glm::mat4 scaleMatrix = glm::scale(glm::vec3(0.01f, 0.01f, 0.01f));
+    const glm::mat4 viewProjectionMatrix = m_camera.getProjectionMatrix() * m_camera.getViewMatrix() * scaleMatrix;
     std::memcpy(dst, &viewProjectionMatrix[0], static_cast<size_t>(c_uniformBufferSize));
     vkUnmapMemory(m_device, m_uniformBufferMemory);
 
@@ -194,7 +201,6 @@ bool Renderer::update(uint32_t imageIndex)
 void Renderer::loadModel()
 {
     m_model.reset(new Model("sponza/Sponza.gltf"));
-    m_numIndices = m_model->indices.size();
 }
 
 void Renderer::releaseModel()
@@ -452,18 +458,17 @@ void Renderer::createSampler()
 
 void Renderer::createTextures()
 {
-    const size_t numImages = m_model->images.size();
-    m_images.resize(numImages);
-    m_imageMemories.resize(numImages);
-    m_imageViews.resize(numImages);
+    const std::vector<Model::Image>& images = m_model->images;
+    const size_t imageCount = images.size();
+    m_images.resize(imageCount);
+    m_imageMemories.resize(imageCount);
+    m_imageViews.resize(imageCount);
     const VkPhysicalDevice physicalDevice = m_context.getPhysicalDevice();
     const VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
-    const Model::Material& mat = m_model->materials[0];
-    const std::vector<int> imageIndices{mat.baseColor, mat.metallicRoughnessImage, mat.normalImage};
 
-    for (size_t i = 0; i < imageIndices.size(); ++i)
+    for (size_t i = 0; i < imageCount; ++i)
     {
-        const Model::Image& image = m_model->images[imageIndices[i]];
+        const Model::Image& image = images[i];
 
         const StagingBuffer stagingBuffer = createStagingBuffer(m_device, physicalDevice, image.data.data(), image.data.size());
 
@@ -579,7 +584,7 @@ void Renderer::createUboDescriptorSetLayouts()
 
 void Renderer::createTexturesDescriptorSetLayouts()
 {
-    const uint32_t imageCount = ui32Size(m_model->images);
+    const uint32_t imageCount = 3;
     std::vector<VkDescriptorSetLayoutBinding> bindings(imageCount);
 
     for (uint32_t i = 0; i < imageCount; ++i)
@@ -614,7 +619,7 @@ void Renderer::createGraphicsPipeline()
     vertexDescription.stride = sizeof(Model::Vertex);
     vertexDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-    std::vector<VkVertexInputAttributeDescription> attributeDescriptions(3);
+    std::vector<VkVertexInputAttributeDescription> attributeDescriptions(4);
 
     attributeDescriptions[0].binding = 0;
     attributeDescriptions[0].location = 0;
@@ -630,6 +635,11 @@ void Renderer::createGraphicsPipeline()
     attributeDescriptions[2].location = 2;
     attributeDescriptions[2].format = VK_FORMAT_R32G32_SFLOAT;
     attributeDescriptions[2].offset = offsetof(Model::Vertex, uv);
+
+    attributeDescriptions[3].binding = 0;
+    attributeDescriptions[3].location = 3;
+    attributeDescriptions[3].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+    attributeDescriptions[3].offset = offsetof(Model::Vertex, tangent);
 
     VkPipelineVertexInputStateCreateInfo vertexInputState{};
     vertexInputState.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -760,9 +770,9 @@ void Renderer::createDescriptorPool()
 {
     const uint32_t swapchainLength = static_cast<uint32_t>(m_context.getSwapchainImages().size());
     const uint32_t numSetsForGUI = 1;
-    const uint32_t numSetsForModel = 1;
+    const uint32_t numSetsForModel = ui32Size(m_model->materials);
 
-    const uint32_t descriptorCount = ui32Size(m_model->images) + numSetsForGUI;
+    const uint32_t descriptorCount = numSetsForModel + numSetsForGUI;
 
     std::array<VkDescriptorPoolSize, 2> poolSizes{};
     poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -799,7 +809,9 @@ void Renderer::createUboDescriptorSets()
 
 void Renderer::createTextureDescriptorSet()
 {
-    std::vector<VkDescriptorSetLayout> layouts{m_texturesDescriptorSetLayout};
+    const size_t materialCount = m_model->materials.size();
+    m_texturesDescriptorSets.resize(materialCount);
+    std::vector<VkDescriptorSetLayout> layouts(materialCount, m_texturesDescriptorSetLayout);
 
     VkDescriptorSetAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -807,7 +819,7 @@ void Renderer::createTextureDescriptorSet()
     allocInfo.descriptorSetCount = ui32Size(layouts);
     allocInfo.pSetLayouts = layouts.data();
     VK_ERROR_FRAGMENTED_POOL;
-    VK_CHECK(vkAllocateDescriptorSets(m_device, &allocInfo, &m_texturesDescriptorSet));
+    VK_CHECK(vkAllocateDescriptorSets(m_device, &allocInfo, m_texturesDescriptorSets.data()));
 }
 
 void Renderer::createUniformBuffer()
@@ -861,25 +873,37 @@ void Renderer::updateUboDescriptorSets()
     vkUpdateDescriptorSets(m_device, ui32Size(descriptorWrites), descriptorWrites.data(), 0, nullptr);
 }
 
-void Renderer::updateTexturesDescriptorSet()
+void Renderer::updateTexturesDescriptorSets()
 {
-    std::vector<VkWriteDescriptorSet> descriptorWrites(m_imageViews.size());
-    std::vector<VkDescriptorImageInfo> imageInfos(m_imageViews.size());
+    const std::vector<Model::Material>& materials = m_model->materials;
+    const size_t materialCount = m_model->materials.size();
+    std::vector<VkWriteDescriptorSet> descriptorWrites(materialCount * 3);
 
-    for (size_t i = 0; i < m_imageViews.size(); ++i)
+    const size_t imageCount = m_model->images.size();
+    std::vector<VkDescriptorImageInfo> imageInfos(imageCount);
+    for (size_t i = 0; i < imageCount; ++i)
     {
         VkDescriptorImageInfo& imageInfo = imageInfos[i];
         imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         imageInfo.imageView = m_imageViews[i];
         imageInfo.sampler = m_sampler;
+    }
 
-        descriptorWrites[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[i].dstSet = m_texturesDescriptorSet;
-        descriptorWrites[i].dstBinding = i;
-        descriptorWrites[i].dstArrayElement = 0;
-        descriptorWrites[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptorWrites[i].descriptorCount = 1;
-        descriptorWrites[i].pImageInfo = &imageInfo;
+    for (size_t i = 0; i < materialCount; ++i)
+    {
+        const size_t offset = i * 3;
+        const std::vector<int> materialIndices{materials[i].baseColor, materials[i].metallicRoughnessImage, materials[i].normalImage};
+        for (size_t j = 0; j < materialIndices.size(); ++j)
+        {
+            descriptorWrites[offset + j].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[offset + j].dstSet = m_texturesDescriptorSets[i];
+            descriptorWrites[offset + j].dstBinding = j;
+            descriptorWrites[offset + j].dstArrayElement = 0;
+            descriptorWrites[offset + j].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            descriptorWrites[offset + j].descriptorCount = 1;
+            const int materialIndex = materialIndices[j] != -1 ? materialIndices[j] : 0;
+            descriptorWrites[offset + j].pImageInfo = &imageInfos[materialIndex];
+        }
     }
 
     vkUpdateDescriptorSets(m_device, ui32Size(descriptorWrites), descriptorWrites.data(), 0, nullptr);
@@ -890,13 +914,36 @@ void Renderer::createVertexAndIndexBuffer()
     VkPhysicalDevice physicalDevice = m_context.getPhysicalDevice();
     const VkMemoryPropertyFlags memoryProperties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
-    const uint64_t vertexBufferSize = sizeof(Model::Vertex) * m_model->vertices.size();
-    const uint64_t indexBufferSize = sizeof(Model::Index) * m_model->indices.size();
+    uint64_t vertexBufferSize = 0;
+    uint64_t indexBufferSize = 0;
+    for (const Model::Primitive& primitive : m_model->primitives)
+    {
+        vertexBufferSize += sizeof(Model::Vertex) * primitive.vertices.size(); // Could be computed while loading the model
+        indexBufferSize += sizeof(Model::Index) * primitive.indices.size();
+    }
+
+    m_primitiveInfos.resize(m_model->primitives.size());
     const uint64_t bufferSize = vertexBufferSize + indexBufferSize;
-    m_offsetToIndexData = vertexBufferSize;
     std::vector<uint8_t> data(bufferSize, 0);
-    std::memcpy(&data[0], m_model->vertices.data(), vertexBufferSize);
-    std::memcpy(&data[m_offsetToIndexData], m_model->indices.data(), indexBufferSize);
+    size_t offset = 0;
+    int32_t vertexCountOffset = 0;
+    for (size_t i = 0; i < m_model->primitives.size(); ++i)
+    {
+        const Model::Primitive& primitive = m_model->primitives[i];
+
+        m_primitiveInfos[i].vertexCountOffset = vertexCountOffset;
+        vertexCountOffset += static_cast<int32_t>(primitive.vertices.size());
+        const size_t vertexDataSize = sizeof(Model::Vertex) * primitive.vertices.size();
+        std::memcpy(&data[offset], primitive.vertices.data(), vertexDataSize);
+        offset += vertexDataSize;
+
+        m_primitiveInfos[i].indexOffset = offset;
+        const size_t indexDataSize = sizeof(Model::Index) * primitive.indices.size();
+        std::memcpy(&data[offset], primitive.indices.data(), indexDataSize);
+        offset += indexDataSize;
+
+        m_primitiveInfos[i].indexCount = ui32Size(primitive.indices);
+    }
     StagingBuffer stagingBuffer = createStagingBuffer(m_device, physicalDevice, data.data(), bufferSize);
 
     VkBufferCreateInfo bufferInfo{};
