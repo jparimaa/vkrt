@@ -52,6 +52,8 @@ std::vector<Model::Primitive> loadPrimitives(const tinygltf::Model& model)
     {
         const tinygltf::Primitive& gltfPrimitive = model.meshes[0].primitives[i];
 
+        primitives[i].material = gltfPrimitive.material;
+
         { // Indices
             const tinygltf::Accessor& accessor = model.accessors[gltfPrimitive.indices];
             const tinygltf::BufferView& bufferView = model.bufferViews[accessor.bufferView];

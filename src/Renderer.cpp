@@ -141,13 +141,13 @@ bool Renderer::render()
 
         VkDeviceSize offsets[] = {0};
         vkCmdBindVertexBuffers(cb, 0, 1, &m_attributeBuffer, offsets);
+        vkCmdBindIndexBuffer(cb, m_attributeBuffer, m_primitiveInfos[0].indexOffset, VK_INDEX_TYPE_UINT32);
         for (size_t i = 0; i < m_primitiveInfos.size(); ++i)
         {
             const PrimitiveInfo& primitiveInfo = m_primitiveInfos[i];
-            vkCmdBindIndexBuffer(cb, m_attributeBuffer, primitiveInfo.indexOffset, VK_INDEX_TYPE_UINT32);
-            const std::vector<VkDescriptorSet> descriptorSets{m_uboDescriptorSets[imageIndex], m_texturesDescriptorSets[0]};
+            const std::vector<VkDescriptorSet> descriptorSets{m_uboDescriptorSets[imageIndex], m_texturesDescriptorSets[primitiveInfo.material]};
             vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0, ui32Size(descriptorSets), descriptorSets.data(), 0, nullptr);
-            vkCmdDrawIndexed(cb, primitiveInfo.indexCount, 1, 0, primitiveInfo.vertexCountOffset, 0);
+            vkCmdDrawIndexed(cb, primitiveInfo.indexCount, 1, primitiveInfo.firstIndex, primitiveInfo.vertexCountOffset, 0);
         }
 
         vkCmdEndRenderPass(cb);
@@ -925,24 +925,29 @@ void Renderer::createVertexAndIndexBuffer()
     m_primitiveInfos.resize(m_model->primitives.size());
     const uint64_t bufferSize = vertexBufferSize + indexBufferSize;
     std::vector<uint8_t> data(bufferSize, 0);
-    size_t offset = 0;
+    size_t vertexOffset = 0;
+    size_t indexOffset = vertexBufferSize;
     int32_t vertexCountOffset = 0;
+    uint32_t firstIndex = 0;
     for (size_t i = 0; i < m_model->primitives.size(); ++i)
     {
         const Model::Primitive& primitive = m_model->primitives[i];
 
-        m_primitiveInfos[i].vertexCountOffset = vertexCountOffset;
-        vertexCountOffset += static_cast<int32_t>(primitive.vertices.size());
-        const size_t vertexDataSize = sizeof(Model::Vertex) * primitive.vertices.size();
-        std::memcpy(&data[offset], primitive.vertices.data(), vertexDataSize);
-        offset += vertexDataSize;
-
-        m_primitiveInfos[i].indexOffset = offset;
-        const size_t indexDataSize = sizeof(Model::Index) * primitive.indices.size();
-        std::memcpy(&data[offset], primitive.indices.data(), indexDataSize);
-        offset += indexDataSize;
-
         m_primitiveInfos[i].indexCount = ui32Size(primitive.indices);
+        m_primitiveInfos[i].vertexCountOffset = vertexCountOffset;
+        m_primitiveInfos[i].indexOffset = indexOffset;
+        m_primitiveInfos[i].firstIndex = firstIndex;
+        m_primitiveInfos[i].material = primitive.material;
+
+        vertexCountOffset += static_cast<int32_t>(primitive.vertices.size());
+        firstIndex += ui32Size(primitive.indices);
+
+        const size_t vertexDataSize = sizeof(Model::Vertex) * primitive.vertices.size();
+        const size_t indexDataSize = sizeof(Model::Index) * primitive.indices.size();
+        std::memcpy(&data[vertexOffset], primitive.vertices.data(), vertexDataSize);
+        std::memcpy(&data[indexOffset], primitive.indices.data(), indexDataSize);
+        vertexOffset += vertexDataSize;
+        indexOffset += indexDataSize;
     }
     StagingBuffer stagingBuffer = createStagingBuffer(m_device, physicalDevice, data.data(), bufferSize);
 

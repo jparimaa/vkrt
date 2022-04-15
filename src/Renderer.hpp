@@ -23,6 +23,8 @@ private:
         int32_t vertexCountOffset{0};
         VkDeviceSize indexOffset{0};
         uint32_t indexCount;
+        uint32_t firstIndex;
+        int material;
     };
 
     bool update(uint32_t imageIndex);
