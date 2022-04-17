@@ -67,7 +67,7 @@ private:
     std::vector<VkFramebuffer> m_framebuffers;
     VkSampler m_sampler;
     std::vector<VkImage> m_images;
-    std::vector<VkDeviceMemory> m_imageMemories;
+    VkDeviceMemory m_imageMemory;
     std::vector<VkImageView> m_imageViews;
     VkDescriptorSetLayout m_uboDescriptorSetLayout;
     VkDescriptorSetLayout m_texturesDescriptorSetLayout;

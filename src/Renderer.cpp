@@ -5,9 +5,9 @@
 #include <imgui.h>
 #include <glm/glm.hpp>
 #include <GLFW/glfw3.h>
-#include <array>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/transform.hpp>
+#include <array>
 
 namespace
 {
@@ -72,10 +72,7 @@ Renderer::~Renderer()
         vkDestroyImage(m_device, image, nullptr);
     }
 
-    for (const VkDeviceMemory& imageMemory : m_imageMemories)
-    {
-        vkFreeMemory(m_device, imageMemory, nullptr);
-    }
+    vkFreeMemory(m_device, m_imageMemory, nullptr);
 
     vkDestroySampler(m_device, m_sampler, nullptr);
 
@@ -461,7 +458,6 @@ void Renderer::createTextures()
     const std::vector<Model::Image>& images = m_model->images;
     const size_t imageCount = images.size();
     m_images.resize(imageCount);
-    m_imageMemories.resize(imageCount);
     m_imageViews.resize(imageCount);
     const VkPhysicalDevice physicalDevice = m_context.getPhysicalDevice();
     const VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
@@ -469,10 +465,6 @@ void Renderer::createTextures()
     for (size_t i = 0; i < imageCount; ++i)
     {
         const Model::Image& image = images[i];
-
-        const StagingBuffer stagingBuffer = createStagingBuffer(m_device, physicalDevice, image.data.data(), image.data.size());
-
-        const VkImageUsageFlags imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
 
         VkImageCreateInfo imageInfo{};
         imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -485,71 +477,78 @@ void Renderer::createTextures()
         imageInfo.format = format;
         imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
         imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        imageInfo.usage = imageUsage;
+        imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
         imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
         imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         imageInfo.flags = 0;
 
         VK_CHECK(vkCreateImage(m_device, &imageInfo, nullptr, &m_images[i]));
+    }
 
-        VkMemoryRequirements memRequirements;
-        vkGetImageMemoryRequirements(m_device, m_images[i], &memRequirements);
+    VkMemoryRequirements memRequirements;
+    vkGetImageMemoryRequirements(m_device, m_images[0], &memRequirements);
 
-        VkMemoryAllocateInfo allocInfo{};
-        allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-        allocInfo.allocationSize = memRequirements.size;
+    VkMemoryAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize = memRequirements.size * imageCount;
+    const VkDeviceSize singleImageSize = memRequirements.size;
 
-        const VkMemoryPropertyFlags memoryProperties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-        const MemoryTypeResult memoryTypeResult = findMemoryType(physicalDevice, memRequirements.memoryTypeBits, memoryProperties);
-        CHECK(memoryTypeResult.found);
+    const VkMemoryPropertyFlags memoryProperties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+    const MemoryTypeResult memoryTypeResult = findMemoryType(physicalDevice, memRequirements.memoryTypeBits, memoryProperties);
+    CHECK(memoryTypeResult.found);
 
-        VK_CHECK(vkAllocateMemory(m_device, &allocInfo, nullptr, &m_imageMemories[i]));
+    VK_CHECK(vkAllocateMemory(m_device, &allocInfo, nullptr, &m_imageMemory));
 
-        vkBindImageMemory(m_device, m_images[i], m_imageMemories[i], 0);
+    for (size_t i = 0; i < imageCount; ++i)
+    {
+        vkBindImageMemory(m_device, m_images[i], m_imageMemory, i * singleImageSize);
 
-        {
-            VkImageMemoryBarrier transferDstBarrier{};
-            transferDstBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-            transferDstBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-            transferDstBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-            transferDstBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            transferDstBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            transferDstBarrier.image = m_images[i];
-            transferDstBarrier.subresourceRange = c_defaultSubresourceRance;
-            transferDstBarrier.srcAccessMask = 0;
-            transferDstBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        const Model::Image& image = images[i];
+        const StagingBuffer stagingBuffer = createStagingBuffer(m_device, physicalDevice, image.data.data(), image.data.size());
 
-            VkImageMemoryBarrier readOnlyBarrier = transferDstBarrier;
-            readOnlyBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-            readOnlyBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-            readOnlyBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-            readOnlyBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        VkImageMemoryBarrier transferDstBarrier{};
+        transferDstBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        transferDstBarrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        transferDstBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        transferDstBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        transferDstBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        transferDstBarrier.image = m_images[i];
+        transferDstBarrier.subresourceRange = c_defaultSubresourceRance;
+        transferDstBarrier.srcAccessMask = 0;
+        transferDstBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 
-            const VkPipelineStageFlags transferSrcFlags = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-            const VkPipelineStageFlags transferDstFlags = VK_PIPELINE_STAGE_TRANSFER_BIT;
-            const VkPipelineStageFlags readOnlySrcFlags = transferDstFlags;
-            const VkPipelineStageFlags readOnlyDstFlags = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        VkImageMemoryBarrier readOnlyBarrier = transferDstBarrier;
+        readOnlyBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        readOnlyBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        readOnlyBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        readOnlyBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-            VkBufferImageCopy region{};
-            region.bufferOffset = 0;
-            region.bufferRowLength = 0;
-            region.bufferImageHeight = 0;
-            region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            region.imageSubresource.mipLevel = 0;
-            region.imageSubresource.baseArrayLayer = 0;
-            region.imageSubresource.layerCount = 1;
-            region.imageOffset = {0, 0, 0};
-            region.imageExtent = {image.width, image.height, 1};
+        const VkPipelineStageFlags transferSrcFlags = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        const VkPipelineStageFlags transferDstFlags = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        const VkPipelineStageFlags readOnlySrcFlags = transferDstFlags;
+        const VkPipelineStageFlags readOnlyDstFlags = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
 
-            const SingleTimeCommand command = beginSingleTimeCommands(m_context.getGraphicsCommandPool(), m_device);
-            const VkCommandBuffer& cb = command.commandBuffer;
+        VkBufferImageCopy region{};
+        region.bufferOffset = 0;
+        region.bufferRowLength = 0;
+        region.bufferImageHeight = 0;
+        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.mipLevel = 0;
+        region.imageSubresource.baseArrayLayer = 0;
+        region.imageSubresource.layerCount = 1;
+        region.imageOffset = {0, 0, 0};
+        region.imageExtent = {image.width, image.height, 1};
 
-            vkCmdPipelineBarrier(cb, transferSrcFlags, transferDstFlags, 0, 0, nullptr, 0, nullptr, 1, &transferDstBarrier);
-            vkCmdCopyBufferToImage(cb, stagingBuffer.buffer, m_images[i], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-            vkCmdPipelineBarrier(cb, readOnlySrcFlags, readOnlyDstFlags, 0, 0, nullptr, 0, nullptr, 1, &readOnlyBarrier);
+        const SingleTimeCommand command = beginSingleTimeCommands(m_context.getGraphicsCommandPool(), m_device);
+        const VkCommandBuffer& cb = command.commandBuffer;
 
-            endSingleTimeCommands(m_context.getGraphicsQueue(), command);
-        }
+        vkCmdPipelineBarrier(cb, transferSrcFlags, transferDstFlags, 0, 0, nullptr, 0, nullptr, 1, &transferDstBarrier);
+        vkCmdCopyBufferToImage(cb, stagingBuffer.buffer, m_images[i], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+        vkCmdPipelineBarrier(cb, readOnlySrcFlags, readOnlyDstFlags, 0, 0, nullptr, 0, nullptr, 1, &readOnlyBarrier);
+
+        endSingleTimeCommands(m_context.getGraphicsQueue(), command);
+
+        releaseStagingBuffer(m_device, stagingBuffer);
 
         VkImageViewCreateInfo viewInfo{};
         viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -559,8 +558,6 @@ void Renderer::createTextures()
         viewInfo.subresourceRange = c_defaultSubresourceRance;
 
         VK_CHECK(vkCreateImageView(m_device, &viewInfo, nullptr, &m_imageViews[i]));
-
-        releaseStagingBuffer(m_device, stagingBuffer);
     }
 }
 
