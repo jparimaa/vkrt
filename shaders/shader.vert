@@ -8,7 +8,7 @@ layout(location = 3) in vec4 inTangent;
 
 layout(set = 0, binding = 0) uniform UBO
 {
-    mat4 viewProjection;
+    mat4 wvpMatrix;
 }
 ubo;
 
@@ -17,7 +17,7 @@ layout(location = 1) out vec2 outUv;
 
 void main()
 {
-    gl_Position = ubo.viewProjection * vec4(inPosition, 1.0);
+    gl_Position = ubo.wvpMatrix * vec4(inPosition, 1.0);
     outNormal = inNormal;
     outUv = inUv;
 }

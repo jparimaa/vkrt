@@ -188,8 +188,8 @@ bool Renderer::update(uint32_t imageIndex)
     void* dst;
     VK_CHECK(vkMapMemory(m_device, m_uniformBufferMemory, imageIndex * c_uniformBufferSize, c_uniformBufferSize, 0, &dst));
     glm::mat4 scaleMatrix = glm::scale(glm::vec3(0.01f, 0.01f, 0.01f));
-    const glm::mat4 viewProjectionMatrix = m_camera.getProjectionMatrix() * m_camera.getViewMatrix() * scaleMatrix;
-    std::memcpy(dst, &viewProjectionMatrix[0], static_cast<size_t>(c_uniformBufferSize));
+    const glm::mat4 wvpMatrix = m_camera.getProjectionMatrix() * m_camera.getViewMatrix() * scaleMatrix;
+    std::memcpy(dst, &wvpMatrix[0], static_cast<size_t>(c_uniformBufferSize));
     vkUnmapMemory(m_device, m_uniformBufferMemory);
 
     return true;
@@ -207,7 +207,8 @@ void Renderer::releaseModel()
 
 void Renderer::setupCamera()
 {
-    m_camera.setPosition(glm::vec3{0.0f, 0.0f, 10.0f});
+    m_camera.setPosition(glm::vec3{-4.0f, 2.0f, -0.2f});
+    m_camera.setRotation(glm::vec3{0.0f, 1.51f, 0.0f});
 }
 
 void Renderer::updateCamera(double deltaTime)
@@ -488,14 +489,15 @@ void Renderer::createTextures()
     VkMemoryRequirements memRequirements;
     vkGetImageMemoryRequirements(m_device, m_images[0], &memRequirements);
 
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = memRequirements.size * imageCount;
-    const VkDeviceSize singleImageSize = memRequirements.size;
-
     const VkMemoryPropertyFlags memoryProperties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     const MemoryTypeResult memoryTypeResult = findMemoryType(physicalDevice, memRequirements.memoryTypeBits, memoryProperties);
     CHECK(memoryTypeResult.found);
+
+    VkMemoryAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.allocationSize = memRequirements.size * imageCount;
+    allocInfo.memoryTypeIndex = memoryTypeResult.typeIndex;
+    const VkDeviceSize singleImageSize = memRequirements.size;
 
     VK_CHECK(vkAllocateMemory(m_device, &allocInfo, nullptr, &m_imageMemory));
 
@@ -908,22 +910,11 @@ void Renderer::updateTexturesDescriptorSets()
 
 void Renderer::createVertexAndIndexBuffer()
 {
-    VkPhysicalDevice physicalDevice = m_context.getPhysicalDevice();
-    const VkMemoryPropertyFlags memoryProperties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-
-    uint64_t vertexBufferSize = 0;
-    uint64_t indexBufferSize = 0;
-    for (const Model::Primitive& primitive : m_model->primitives)
-    {
-        vertexBufferSize += sizeof(Model::Vertex) * primitive.vertices.size(); // Could be computed while loading the model
-        indexBufferSize += sizeof(Model::Index) * primitive.indices.size();
-    }
-
     m_primitiveInfos.resize(m_model->primitives.size());
-    const uint64_t bufferSize = vertexBufferSize + indexBufferSize;
+    const uint64_t bufferSize = m_model->vertexBufferSizeInBytes + m_model->indexBufferSizeInBytes;
     std::vector<uint8_t> data(bufferSize, 0);
     size_t vertexOffset = 0;
-    size_t indexOffset = vertexBufferSize;
+    size_t indexOffset = m_model->vertexBufferSizeInBytes;
     int32_t vertexCountOffset = 0;
     uint32_t firstIndex = 0;
     for (size_t i = 0; i < m_model->primitives.size(); ++i)
@@ -946,6 +937,8 @@ void Renderer::createVertexAndIndexBuffer()
         vertexOffset += vertexDataSize;
         indexOffset += indexDataSize;
     }
+
+    VkPhysicalDevice physicalDevice = m_context.getPhysicalDevice();
     StagingBuffer stagingBuffer = createStagingBuffer(m_device, physicalDevice, data.data(), bufferSize);
 
     VkBufferCreateInfo bufferInfo{};
@@ -962,6 +955,7 @@ void Renderer::createVertexAndIndexBuffer()
     VkMemoryRequirements memRequirements;
     vkGetBufferMemoryRequirements(m_device, m_attributeBuffer, &memRequirements);
 
+    const VkMemoryPropertyFlags memoryProperties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     const MemoryTypeResult memoryTypeResult = findMemoryType(physicalDevice, memRequirements.memoryTypeBits, memoryProperties);
     CHECK(memoryTypeResult.found);
 

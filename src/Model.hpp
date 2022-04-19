@@ -47,4 +47,7 @@ public:
     std::vector<Primitive> primitives;
     std::vector<Material> materials;
     std::vector<Image> images;
+
+    uint64_t vertexBufferSizeInBytes = 0;
+    uint64_t indexBufferSizeInBytes = 0;
 };

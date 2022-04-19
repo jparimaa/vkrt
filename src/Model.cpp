@@ -181,5 +181,11 @@ Model::Model(const std::string& filename)
     materials = loadMaterials(gltfModel);
     images = loadImages(gltfModel);
 
+    for (const Model::Primitive& primitive : primitives)
+    {
+        vertexBufferSizeInBytes += sizeof(Model::Vertex) * primitive.vertices.size();
+        indexBufferSizeInBytes += sizeof(Model::Index) * primitive.indices.size();
+    }
+
     printf("Completed\n");
 }
