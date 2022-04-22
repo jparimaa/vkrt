@@ -12,8 +12,11 @@ layout(location = 0) out vec4 outColor;
 
 void main()
 {
-    outColor = //
-        (texture(baseColor, inUv) * 0.8 + //
-         texture(metallicRoughness, inUv) * 0.1 + //
-         texture(normal, inUv) * 0.1);
+    vec4 color = texture(baseColor, inUv);
+    if (color.a < 0.1)
+    {
+        // A bit nasty but works for this case.
+        discard;
+    }
+    outColor = color;
 }
