@@ -39,6 +39,7 @@ private:
     void createFramebuffers();
     void createSampler();
     void createTextures();
+    void createMipmaps(VkImage image, uint32_t mipLevels, glm::uvec2 imageSize);
     void createUboDescriptorSetLayouts();
     void createTexturesDescriptorSetLayouts();
     void createGraphicsPipeline();

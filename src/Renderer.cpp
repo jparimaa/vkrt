@@ -8,6 +8,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/transform.hpp>
 #include <array>
+#include <cmath>
 
 namespace
 {
@@ -441,7 +442,7 @@ void Renderer::createSampler()
     samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     samplerInfo.anisotropyEnable = VK_FALSE;
-    samplerInfo.maxAnisotropy = 16;
+    samplerInfo.maxAnisotropy = 1;
     samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
     samplerInfo.unnormalizedCoordinates = VK_FALSE;
     samplerInfo.compareEnable = VK_FALSE;
@@ -449,7 +450,7 @@ void Renderer::createSampler()
     samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
     samplerInfo.mipLodBias = 0.0f;
     samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 512.0f;
+    samplerInfo.maxLod = VK_LOD_CLAMP_NONE;
 
     VK_CHECK(vkCreateSampler(m_device, &samplerInfo, nullptr, &m_sampler));
 }
@@ -466,6 +467,8 @@ void Renderer::createTextures()
     for (size_t i = 0; i < imageCount; ++i)
     {
         const Model::Image& image = images[i];
+        const glm::uvec2 imageResolution{images[i].width, images[i].height};
+        const unsigned int mipLevelCount = static_cast<uint32_t>(std::floor(std::log2(std::max(imageResolution.x, imageResolution.y))) + 1);
 
         VkImageCreateInfo imageInfo{};
         imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -473,12 +476,12 @@ void Renderer::createTextures()
         imageInfo.extent.width = image.width;
         imageInfo.extent.height = image.height;
         imageInfo.extent.depth = 1;
-        imageInfo.mipLevels = 1;
+        imageInfo.mipLevels = mipLevelCount;
         imageInfo.arrayLayers = 1;
         imageInfo.format = format;
         imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
         imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
         imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
         imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         imageInfo.flags = 0;
@@ -506,6 +509,9 @@ void Renderer::createTextures()
         vkBindImageMemory(m_device, m_images[i], m_imageMemory, i * singleImageSize);
 
         const Model::Image& image = images[i];
+        const glm::uvec2 imageResolution{images[i].width, images[i].height};
+        const unsigned int mipLevelCount = static_cast<uint32_t>(std::floor(std::log2(std::max(imageResolution.x, imageResolution.y))) + 1);
+
         const StagingBuffer stagingBuffer = createStagingBuffer(m_device, physicalDevice, image.data.data(), image.data.size());
 
         VkImageMemoryBarrier transferDstBarrier{};
@@ -516,19 +522,12 @@ void Renderer::createTextures()
         transferDstBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         transferDstBarrier.image = m_images[i];
         transferDstBarrier.subresourceRange = c_defaultSubresourceRance;
+        transferDstBarrier.subresourceRange.levelCount = mipLevelCount;
         transferDstBarrier.srcAccessMask = 0;
         transferDstBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 
-        VkImageMemoryBarrier readOnlyBarrier = transferDstBarrier;
-        readOnlyBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        readOnlyBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        readOnlyBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        readOnlyBarrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-
         const VkPipelineStageFlags transferSrcFlags = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
         const VkPipelineStageFlags transferDstFlags = VK_PIPELINE_STAGE_TRANSFER_BIT;
-        const VkPipelineStageFlags readOnlySrcFlags = transferDstFlags;
-        const VkPipelineStageFlags readOnlyDstFlags = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
 
         VkBufferImageCopy region{};
         region.bufferOffset = 0;
@@ -546,11 +545,12 @@ void Renderer::createTextures()
 
         vkCmdPipelineBarrier(cb, transferSrcFlags, transferDstFlags, 0, 0, nullptr, 0, nullptr, 1, &transferDstBarrier);
         vkCmdCopyBufferToImage(cb, stagingBuffer.buffer, m_images[i], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-        vkCmdPipelineBarrier(cb, readOnlySrcFlags, readOnlyDstFlags, 0, 0, nullptr, 0, nullptr, 1, &readOnlyBarrier);
 
         endSingleTimeCommands(m_context.getGraphicsQueue(), command);
 
         releaseStagingBuffer(m_device, stagingBuffer);
+
+        createMipmaps(m_images[i], mipLevelCount, imageResolution);
 
         VkImageViewCreateInfo viewInfo{};
         viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -558,9 +558,80 @@ void Renderer::createTextures()
         viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
         viewInfo.format = format;
         viewInfo.subresourceRange = c_defaultSubresourceRance;
+        viewInfo.subresourceRange.levelCount = mipLevelCount;
 
         VK_CHECK(vkCreateImageView(m_device, &viewInfo, nullptr, &m_imageViews[i]));
     }
+}
+
+void Renderer::createMipmaps(VkImage image, uint32_t mipLevels, glm::uvec2 imageSize)
+{
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.image = image;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.subresourceRange.levelCount = 1;
+
+    const VkPipelineStageFlagBits transferStageMask = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    const VkImageLayout transferDstLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    const VkImageLayout transferSrcLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+
+    int32_t mipWidth = imageSize.x;
+    int32_t mipHeight = imageSize.y;
+
+    const SingleTimeCommand command = beginSingleTimeCommands(m_context.getGraphicsCommandPool(), m_device);
+    const VkCommandBuffer& cb = command.commandBuffer;
+
+    for (uint32_t i = 1; i < mipLevels; ++i)
+    {
+        barrier.subresourceRange.baseMipLevel = i - 1;
+        barrier.oldLayout = transferDstLayout;
+        barrier.newLayout = transferSrcLayout;
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+
+        vkCmdPipelineBarrier(cb, transferStageMask, transferStageMask, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+        VkImageBlit blit{};
+        blit.srcOffsets[0] = {0, 0, 0};
+        blit.srcOffsets[1] = {mipWidth, mipHeight, 1};
+        blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        blit.srcSubresource.mipLevel = i - 1;
+        blit.srcSubresource.baseArrayLayer = 0;
+        blit.srcSubresource.layerCount = 1;
+        blit.dstOffsets[0] = {0, 0, 0};
+        blit.dstOffsets[1] = {mipWidth > 1 ? mipWidth / 2 : 1, mipHeight > 1 ? mipHeight / 2 : 1, 1};
+        blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        blit.dstSubresource.mipLevel = i;
+        blit.dstSubresource.baseArrayLayer = 0;
+        blit.dstSubresource.layerCount = 1;
+
+        vkCmdBlitImage(cb, image, transferSrcLayout, image, transferDstLayout, 1, &blit, VK_FILTER_LINEAR);
+
+        barrier.oldLayout = transferSrcLayout;
+        barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+        vkCmdPipelineBarrier(cb, transferStageMask, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+        mipWidth = mipWidth > 1 ? mipWidth / 2 : mipWidth;
+        mipHeight = mipHeight > 1 ? mipHeight / 2 : mipHeight;
+    }
+
+    barrier.subresourceRange.baseMipLevel = mipLevels - 1;
+    barrier.oldLayout = transferDstLayout;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+    vkCmdPipelineBarrier(cb, transferStageMask, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+    endSingleTimeCommands(m_context.getGraphicsQueue(), command);
 }
 
 void Renderer::createUboDescriptorSetLayouts()
