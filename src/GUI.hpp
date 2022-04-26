@@ -21,7 +21,9 @@ public:
         VkFormat depthFormat;
         GLFWwindow* glfwWindow;
         uint32_t imageCount;
+        VkSampleCountFlagBits sampleCount;
         VkDescriptorPool descriptorPool;
+        VkRenderPass renderPass;
     };
 
     GUI(const InitData& initData);
@@ -31,9 +33,6 @@ public:
     void endFrame(VkCommandBuffer commandBuffer, VkFramebuffer framebuffer);
 
 private:
-    void createRenderPass(VkFormat colorFormat, VkFormat depthFormat);
-
     VkDevice m_device;
-    VkRenderPass m_renderPass;
     VkExtent2D m_extent;
 };

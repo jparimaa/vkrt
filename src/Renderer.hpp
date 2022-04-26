@@ -34,6 +34,7 @@ private:
     void setupCamera();
     void updateCamera(double deltaTime);
     void createRenderPass();
+    void createMsaaColorImage();
     void createDepthImage();
     void createSwapchainImageViews();
     void createFramebuffers();
@@ -61,10 +62,13 @@ private:
     std::chrono::steady_clock::time_point m_lastRenderTime;
     std::unordered_map<int, bool> m_keysDown;
     VkRenderPass m_renderPass;
+    VkImage m_msaaColorImage;
+    VkDeviceMemory m_msaaColorImageMemory;
+    VkImageView m_msaaColorImageView;
     VkImage m_depthImage;
     VkDeviceMemory m_depthImageMemory;
-    std::vector<VkImageView> m_swapchainImageViews;
     VkImageView m_depthImageView;
+    std::vector<VkImageView> m_swapchainImageViews;
     std::vector<VkFramebuffer> m_framebuffers;
     VkSampler m_sampler;
     std::vector<VkImage> m_images;
