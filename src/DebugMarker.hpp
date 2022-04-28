@@ -18,7 +18,7 @@ public:
 
     static void beginLabel(VkCommandBuffer cb, const std::string& name, std::array<float, 4> color = white);
     static void endLabel(VkCommandBuffer cb);
-    static void setObjectName(VkObjectType type, uint64_t handle, const std::string& name);
+    static void setObjectName(VkObjectType type, void* handle, const std::string& name);
 
 private:
     static VkInstance s_instance;

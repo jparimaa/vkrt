@@ -224,6 +224,7 @@ VkShaderModule createShaderModule(VkDevice device, const std::filesystem::path& 
 
     VkShaderModule shaderModule;
     VK_CHECK(vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_SHADER_MODULE, shaderModule, "Shader module " + path.string());
 
     return shaderModule;
 }
@@ -238,7 +239,7 @@ StagingBuffer createStagingBuffer(VkDevice device, VkPhysicalDevice physicalDevi
 
     VkBuffer buffer;
     VK_CHECK(vkCreateBuffer(device, &bufferInfo, nullptr, &buffer));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_BUFFER, (uint64_t)buffer, "Staging buffer");
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_BUFFER, buffer, "Staging buffer");
 
     VkMemoryRequirements memRequirements;
     vkGetBufferMemoryRequirements(device, buffer, &memRequirements);
@@ -255,7 +256,7 @@ StagingBuffer createStagingBuffer(VkDevice device, VkPhysicalDevice physicalDevi
 
     VkDeviceMemory memory;
     VK_CHECK(vkAllocateMemory(device, &allocInfo, nullptr, &memory));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, (uint64_t)memory, "Staging buffer memory");
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, memory, "Staging buffer memory");
 
     VK_CHECK(vkBindBufferMemory(device, buffer, memory, 0));
 

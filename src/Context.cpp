@@ -1,5 +1,6 @@
 #include "Context.hpp"
 #include "Utils.hpp"
+#include "DebugMarker.hpp"
 
 #include <set>
 #include <algorithm>
@@ -311,6 +312,8 @@ void Context::createDevice()
     vkGetDeviceQueue(m_device, indices.graphicsFamily, 0, &m_graphicsQueue);
     vkGetDeviceQueue(m_device, indices.computeFamily, 0, &m_computeQueue);
     vkGetDeviceQueue(m_device, indices.presentFamily, 0, &m_presentQueue);
+
+    DebugMarker::initialize(m_instance, m_device);
 }
 
 void Context::createSwapchain()
@@ -389,6 +392,8 @@ void Context::createSemaphores()
 
     VK_CHECK(vkCreateSemaphore(m_device, &semaphoreInfo, nullptr, &m_imageAvailable));
     VK_CHECK(vkCreateSemaphore(m_device, &semaphoreInfo, nullptr, &m_renderFinished));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_SEMAPHORE, m_imageAvailable, "Semaphore - Image available");
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_SEMAPHORE, m_renderFinished, "Semaphore - Render finished");
 }
 
 void Context::createFences()

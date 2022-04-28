@@ -43,6 +43,10 @@ function(add_shader TARGET SHADER)
 
     set_source_files_properties(${_shader_output_path} PROPERTIES GENERATED TRUE)
     target_sources(${TARGET} PRIVATE ${_shader_output_path})
+    add_custom_command(
+        TARGET ${TARGET} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy ${_shader_output_path} $<TARGET_FILE_DIR:${TARGET}>/${SHADER}.spv
+      )
 endfunction(add_shader)
 
 file(GLOB _shader_list "${CMAKE_CURRENT_SOURCE_DIR}/shaders/*")

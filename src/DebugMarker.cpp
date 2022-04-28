@@ -40,14 +40,14 @@ void DebugMarker::endLabel(VkCommandBuffer cb)
     vkCmdEndDebugUtilsLabelEXT(cb);
 }
 
-void DebugMarker::setObjectName(VkObjectType type, uint64_t handle, const std::string& name)
+void DebugMarker::setObjectName(VkObjectType type, void* handle, const std::string& name)
 {
     CHECK(s_initialized);
 
     VkDebugUtilsObjectNameInfoEXT nameInfo{};
     nameInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_OBJECT_NAME_INFO_EXT;
     nameInfo.objectType = type;
-    nameInfo.objectHandle = handle;
+    nameInfo.objectHandle = reinterpret_cast<uint64_t>(handle);
     nameInfo.pObjectName = name.c_str();
     vkSetDebugUtilsObjectNameEXT(s_device, &nameInfo);
 }

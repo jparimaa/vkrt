@@ -22,8 +22,6 @@ Renderer::Renderer(Context& context) :
     m_device(context.getDevice()),
     m_lastRenderTime(std::chrono::high_resolution_clock::now())
 {
-    DebugMarker::initialize(m_context.getInstance(), m_device);
-
     loadModel();
     setupCamera();
     createRenderPass();
@@ -335,6 +333,7 @@ void Renderer::createRenderPass()
     renderPassInfo.pDependencies = &dependency;
 
     VK_CHECK(vkCreateRenderPass(m_device, &renderPassInfo, nullptr, &m_renderPass));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_RENDER_PASS, m_renderPass, "Render pass - Main");
 }
 
 void Renderer::createMsaaColorImage()
@@ -356,6 +355,7 @@ void Renderer::createMsaaColorImage()
     imageInfo.flags = 0;
 
     VK_CHECK(vkCreateImage(m_device, &imageInfo, nullptr, &m_msaaColorImage));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_IMAGE, m_msaaColorImage, "Image - MSAA color");
 
     VkMemoryRequirements memRequirements;
     vkGetImageMemoryRequirements(m_device, m_msaaColorImage, &memRequirements);
@@ -369,6 +369,7 @@ void Renderer::createMsaaColorImage()
     allocInfo.memoryTypeIndex = memoryTypeResult.typeIndex;
 
     VK_CHECK(vkAllocateMemory(m_device, &allocInfo, nullptr, &m_msaaColorImageMemory));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_msaaColorImageMemory, "Memory - MSAA color image");
     VK_CHECK(vkBindImageMemory(m_device, m_msaaColorImage, m_msaaColorImageMemory, 0));
 
     VkImageViewCreateInfo createInfo{};
@@ -380,6 +381,7 @@ void Renderer::createMsaaColorImage()
     createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 
     VK_CHECK(vkCreateImageView(m_device, &createInfo, nullptr, &m_msaaColorImageView));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_IMAGE_VIEW, m_msaaColorImageView, "Image view - MSAA color");
 }
 
 void Renderer::createDepthImage()
@@ -401,6 +403,7 @@ void Renderer::createDepthImage()
     imageInfo.flags = 0;
 
     VK_CHECK(vkCreateImage(m_device, &imageInfo, nullptr, &m_depthImage));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_IMAGE, m_msaaColorImage, "Image - MSAA depth");
 
     VkMemoryRequirements memRequirements;
     vkGetImageMemoryRequirements(m_device, m_depthImage, &memRequirements);
@@ -414,6 +417,7 @@ void Renderer::createDepthImage()
     allocInfo.memoryTypeIndex = memoryTypeResult.typeIndex;
 
     VK_CHECK(vkAllocateMemory(m_device, &allocInfo, nullptr, &m_depthImageMemory));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_msaaColorImageMemory, "Memory - MSAA depth image");
     VK_CHECK(vkBindImageMemory(m_device, m_depthImage, m_depthImageMemory, 0));
 
     VkImageViewCreateInfo createInfo{};
@@ -425,6 +429,7 @@ void Renderer::createDepthImage()
     createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
 
     VK_CHECK(vkCreateImageView(m_device, &createInfo, nullptr, &m_depthImageView));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_IMAGE_VIEW, m_depthImageView, "Image view - MSAA depth");
 }
 
 void Renderer::createSwapchainImageViews()
@@ -467,6 +472,7 @@ void Renderer::createFramebuffers()
         framebufferInfo.pAttachments = attachments.data();
 
         VK_CHECK(vkCreateFramebuffer(m_device, &framebufferInfo, nullptr, &m_framebuffers[i]));
+        DebugMarker::setObjectName(VK_OBJECT_TYPE_FRAMEBUFFER, m_framebuffers[i], "Framebuffer " + std::to_string(i));
     }
 }
 
@@ -491,6 +497,7 @@ void Renderer::createSampler()
     samplerInfo.maxLod = VK_LOD_CLAMP_NONE;
 
     VK_CHECK(vkCreateSampler(m_device, &samplerInfo, nullptr, &m_sampler));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_SAMPLER, m_sampler, "Sampler - Main");
 }
 
 void Renderer::createTextures()
@@ -525,6 +532,7 @@ void Renderer::createTextures()
         imageInfo.flags = 0;
 
         VK_CHECK(vkCreateImage(m_device, &imageInfo, nullptr, &m_images[i]));
+        DebugMarker::setObjectName(VK_OBJECT_TYPE_IMAGE, m_images[i], "Image - Sponza " + std::to_string(i));
     }
 
     VkMemoryRequirements memRequirements;
@@ -541,6 +549,7 @@ void Renderer::createTextures()
     const VkDeviceSize singleImageSize = memRequirements.size;
 
     VK_CHECK(vkAllocateMemory(m_device, &allocInfo, nullptr, &m_imageMemory));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_msaaColorImageMemory, "Memory - Texture images");
 
     for (size_t i = 0; i < imageCount; ++i)
     {
@@ -599,6 +608,7 @@ void Renderer::createTextures()
         viewInfo.subresourceRange.levelCount = mipLevelCount;
 
         VK_CHECK(vkCreateImageView(m_device, &viewInfo, nullptr, &m_imageViews[i]));
+        DebugMarker::setObjectName(VK_OBJECT_TYPE_IMAGE_VIEW, m_imageViews[i], "Image view - Sponza " + std::to_string(i));
     }
 }
 
@@ -688,6 +698,7 @@ void Renderer::createUboDescriptorSetLayouts()
     layoutInfo.pBindings = bindings.data();
 
     VK_CHECK(vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_uboDescriptorSetLayout));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, m_uboDescriptorSetLayout, "Desc set layout - UBO");
 }
 
 void Renderer::createTexturesDescriptorSetLayouts()
@@ -710,6 +721,7 @@ void Renderer::createTexturesDescriptorSetLayouts()
     layoutInfo.pBindings = bindings.data();
 
     VK_CHECK(vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_texturesDescriptorSetLayout));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, m_uboDescriptorSetLayout, "Desc set layout - Texture");
 }
 
 void Renderer::createGraphicsPipeline()
@@ -721,6 +733,7 @@ void Renderer::createGraphicsPipeline()
     pipelineLayoutInfo.pSetLayouts = descriptorSetLayouts.data();
 
     VK_CHECK(vkCreatePipelineLayout(m_device, &pipelineLayoutInfo, nullptr, &m_pipelineLayout));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_PIPELINE_LAYOUT, m_pipelineLayout, "Pipeline layout - Renderer");
 
     VkVertexInputBindingDescription vertexDescription{};
     vertexDescription.binding = 0;
@@ -831,8 +844,9 @@ void Renderer::createGraphicsPipeline()
     colorBlendState.blendConstants[2] = 0.0f;
     colorBlendState.blendConstants[3] = 0.0f;
 
-    VkShaderModule vertexShaderModule = createShaderModule(m_device, "shaders/shader.vert.spv");
-    VkShaderModule fragmentShaderModule = createShaderModule(m_device, "shaders/shader.frag.spv");
+    const std::filesystem::path currentPath = getCurrentExecutableDirectory();
+    VkShaderModule vertexShaderModule = createShaderModule(m_device, currentPath / "shader.vert.spv");
+    VkShaderModule fragmentShaderModule = createShaderModule(m_device, currentPath / "shader.frag.spv");
 
     VkPipelineShaderStageCreateInfo vertexShaderStageInfo{};
     vertexShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -867,6 +881,7 @@ void Renderer::createGraphicsPipeline()
     pipelineInfo.basePipelineIndex = -1;
 
     VK_CHECK(vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_graphicsPipeline));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_PIPELINE, m_graphicsPipeline, "Pipeline - Renderer");
 
     for (const VkPipelineShaderStageCreateInfo& stage : shaderStages)
     {
@@ -897,6 +912,7 @@ void Renderer::createDescriptorPool()
     poolInfo.maxSets = maxSets;
 
     VK_CHECK(vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_descriptorPool));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_POOL, m_descriptorPool, "Descriptor pool - Renderer");
 }
 
 void Renderer::createUboDescriptorSets()
@@ -913,6 +929,10 @@ void Renderer::createUboDescriptorSets()
     allocInfo.pSetLayouts = layouts.data();
 
     VK_CHECK(vkAllocateDescriptorSets(m_device, &allocInfo, m_uboDescriptorSets.data()));
+    for (size_t i = 0; i < m_uboDescriptorSets.size(); ++i)
+    {
+        DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET, m_uboDescriptorSets[i], "Desc set - UBO " + std::to_string(i));
+    }
 }
 
 void Renderer::createTextureDescriptorSet()
@@ -928,6 +948,10 @@ void Renderer::createTextureDescriptorSet()
     allocInfo.pSetLayouts = layouts.data();
     VK_ERROR_FRAGMENTED_POOL;
     VK_CHECK(vkAllocateDescriptorSets(m_device, &allocInfo, m_texturesDescriptorSets.data()));
+    for (size_t i = 0; i < m_texturesDescriptorSets.size(); ++i)
+    {
+        DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET, m_texturesDescriptorSets[i], "Desc set - Texture " + std::to_string(i));
+    }
 }
 
 void Renderer::createUniformBuffer()
@@ -942,6 +966,7 @@ void Renderer::createUniformBuffer()
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VK_CHECK(vkCreateBuffer(m_device, &bufferInfo, nullptr, &m_uniformBuffer));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_BUFFER, m_uniformBuffer, "Buffer - Renderer uniform buffer");
 
     VkMemoryRequirements memRequirements;
     vkGetBufferMemoryRequirements(m_device, m_uniformBuffer, &memRequirements);
@@ -955,6 +980,8 @@ void Renderer::createUniformBuffer()
     allocInfo.memoryTypeIndex = memoryTypeResult.typeIndex;
 
     VK_CHECK(vkAllocateMemory(m_device, &allocInfo, nullptr, &m_uniformBufferMemory));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_uniformBufferMemory, "Memory - Renderer uniform buffer");
+
     VK_CHECK(vkBindBufferMemory(m_device, m_uniformBuffer, m_uniformBufferMemory, 0));
 }
 
@@ -1060,6 +1087,7 @@ void Renderer::createVertexAndIndexBuffer()
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VK_CHECK(vkCreateBuffer(m_device, &bufferInfo, nullptr, &m_attributeBuffer));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_BUFFER, m_attributeBuffer, "Buffer - Attribute");
 
     VkMemoryRequirements memRequirements;
     vkGetBufferMemoryRequirements(m_device, m_attributeBuffer, &memRequirements);
@@ -1074,6 +1102,8 @@ void Renderer::createVertexAndIndexBuffer()
     allocInfo.memoryTypeIndex = memoryTypeResult.typeIndex;
 
     VK_CHECK(vkAllocateMemory(m_device, &allocInfo, nullptr, &m_attributeBufferMemory));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_attributeBufferMemory, "Memory - Attribute buffer");
+
     VK_CHECK(vkBindBufferMemory(m_device, m_attributeBuffer, m_attributeBufferMemory, 0));
 
     const SingleTimeCommand command = beginSingleTimeCommands(m_context.getGraphicsCommandPool(), m_device);

@@ -2,6 +2,7 @@
 
 #include <glm/glm.hpp>
 #include <cstdint>
+#include <filesystem>
 #include <string>
 
 #define CHECK(f)                                                           \
@@ -46,3 +47,5 @@ uint32_t ui32Size(const T& container)
 {
     return static_cast<uint32_t>(container.size());
 }
+
+std::filesystem::path getCurrentExecutableDirectory();
