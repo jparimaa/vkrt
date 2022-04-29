@@ -61,8 +61,9 @@ private:
     std::vector<VkImage> m_swapchainImages;
     VkCommandPool m_graphicsCommandPool;
     VkCommandPool m_computeCommandPool;
-    VkSemaphore m_imageAvailable;
-    VkSemaphore m_renderFinished;
+    std::vector<VkSemaphore> m_imageAvailableSemaphores;
+    std::vector<VkSemaphore> m_renderFinishedSemaphores;
     std::vector<VkFence> m_inFlightFences;
+    uint32_t m_frameIndex{0};
     uint32_t m_imageIndex;
 };

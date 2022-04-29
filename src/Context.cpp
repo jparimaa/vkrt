@@ -55,13 +55,13 @@ Context::~Context()
 {
     vkDeviceWaitIdle(m_device);
 
-    for (VkFence fence : m_inFlightFences)
+    for (size_t i = 0; i < m_swapchainImages.size(); ++i)
     {
-        vkDestroyFence(m_device, fence, nullptr);
+        vkDestroyFence(m_device, m_inFlightFences[i], nullptr);
+        vkDestroySemaphore(m_device, m_renderFinishedSemaphores[i], nullptr);
+        vkDestroySemaphore(m_device, m_imageAvailableSemaphores[i], nullptr);
     }
 
-    vkDestroySemaphore(m_device, m_renderFinished, nullptr);
-    vkDestroySemaphore(m_device, m_imageAvailable, nullptr);
     vkDestroyCommandPool(m_device, m_computeCommandPool, nullptr);
     vkDestroyCommandPool(m_device, m_graphicsCommandPool, nullptr);
 
@@ -140,9 +140,14 @@ glm::dvec2 Context::getCursorPosition()
 
 uint32_t Context::acquireNextSwapchainImage()
 {
-    VK_CHECK(vkAcquireNextImageKHR(m_device, m_swapchain, c_timeout, m_imageAvailable, VK_NULL_HANDLE, &m_imageIndex));
-    VK_CHECK(vkWaitForFences(m_device, 1, &m_inFlightFences[m_imageIndex], true, c_timeout));
-    VK_CHECK(vkResetFences(m_device, 1, &m_inFlightFences[m_imageIndex]));
+    ++m_frameIndex;
+    if (m_frameIndex == ui32Size(m_swapchainImages))
+    {
+        m_frameIndex = 0;
+    }
+    VK_CHECK(vkAcquireNextImageKHR(m_device, m_swapchain, c_timeout, m_imageAvailableSemaphores[m_frameIndex], VK_NULL_HANDLE, &m_imageIndex));
+    VK_CHECK(vkWaitForFences(m_device, 1, &m_inFlightFences[m_frameIndex], true, c_timeout));
+    VK_CHECK(vkResetFences(m_device, 1, &m_inFlightFences[m_frameIndex]));
     return m_imageIndex;
 }
 
@@ -153,19 +158,19 @@ void Context::submitCommandBuffers(const std::vector<VkCommandBuffer>& commandBu
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.waitSemaphoreCount = 1;
-    submitInfo.pWaitSemaphores = &m_imageAvailable;
+    submitInfo.pWaitSemaphores = &m_imageAvailableSemaphores[m_frameIndex];
     submitInfo.pWaitDstStageMask = waitStages;
     submitInfo.commandBufferCount = ui32Size(commandBuffers);
     submitInfo.pCommandBuffers = commandBuffers.data();
     submitInfo.signalSemaphoreCount = 1;
-    submitInfo.pSignalSemaphores = &m_renderFinished;
+    submitInfo.pSignalSemaphores = &m_renderFinishedSemaphores[m_frameIndex];
 
-    VK_CHECK(vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, m_inFlightFences[m_imageIndex]));
+    VK_CHECK(vkQueueSubmit(m_graphicsQueue, 1, &submitInfo, m_inFlightFences[m_frameIndex]));
 
     VkPresentInfoKHR presentInfo{};
     presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     presentInfo.waitSemaphoreCount = 1;
-    presentInfo.pWaitSemaphores = &m_renderFinished;
+    presentInfo.pWaitSemaphores = &m_renderFinishedSemaphores[m_frameIndex];
     presentInfo.swapchainCount = 1;
     presentInfo.pSwapchains = &m_swapchain;
     presentInfo.pImageIndices = &m_imageIndex;
@@ -387,13 +392,20 @@ void Context::createCommandPools()
 
 void Context::createSemaphores()
 {
+    const size_t swapchainImageCount = m_swapchainImages.size();
+    m_imageAvailableSemaphores.resize(swapchainImageCount);
+    m_renderFinishedSemaphores.resize(swapchainImageCount);
     VkSemaphoreCreateInfo semaphoreInfo{};
     semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
-    VK_CHECK(vkCreateSemaphore(m_device, &semaphoreInfo, nullptr, &m_imageAvailable));
-    VK_CHECK(vkCreateSemaphore(m_device, &semaphoreInfo, nullptr, &m_renderFinished));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_SEMAPHORE, m_imageAvailable, "Semaphore - Image available");
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_SEMAPHORE, m_renderFinished, "Semaphore - Render finished");
+    for (size_t i = 0; i < swapchainImageCount; ++i)
+    {
+        const std::string iStr = std::to_string(i);
+        VK_CHECK(vkCreateSemaphore(m_device, &semaphoreInfo, nullptr, &m_imageAvailableSemaphores[i]));
+        VK_CHECK(vkCreateSemaphore(m_device, &semaphoreInfo, nullptr, &m_renderFinishedSemaphores[i]));
+        DebugMarker::setObjectName(VK_OBJECT_TYPE_SEMAPHORE, m_imageAvailableSemaphores[i], "Semaphore - Image available " + iStr);
+        DebugMarker::setObjectName(VK_OBJECT_TYPE_SEMAPHORE, m_renderFinishedSemaphores[i], "Semaphore - Render finished " + iStr);
+    }
 }
 
 void Context::createFences()
@@ -405,8 +417,9 @@ void Context::createFences()
     createInfo.pNext = nullptr;
     createInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
-    for (VkFence& fence : m_inFlightFences)
+    for (size_t i = 0; i < m_inFlightFences.size(); ++i)
     {
-        vkCreateFence(m_device, &createInfo, nullptr, &fence);
+        vkCreateFence(m_device, &createInfo, nullptr, &m_inFlightFences[i]);
+        DebugMarker::setObjectName(VK_OBJECT_TYPE_FENCE, m_inFlightFences[i], "Fence - In flight " + std::to_string(i));
     }
 }
