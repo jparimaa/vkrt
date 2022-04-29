@@ -152,8 +152,8 @@ bool Renderer::render()
         DebugMarker::beginLabel(cb, "GUI");
 
         m_gui->beginFrame();
-        ImGui::Begin("Hello, world!");
-        ImGui::Text("This is some useful text.");
+        ImGui::Begin("GUI");
+        ImGui::Text("FPS %f", m_fps);
         ImGui::End();
         m_gui->endFrame(cb, m_framebuffers[imageIndex]);
 
@@ -179,6 +179,7 @@ bool Renderer::update(uint32_t imageIndex)
 
     using namespace std::chrono;
     const double deltaTime = static_cast<double>(duration_cast<nanoseconds>(high_resolution_clock::now() - m_lastRenderTime).count()) / 1'000'000'000.0;
+    m_fps = 1.0f / deltaTime;
     m_lastRenderTime = high_resolution_clock::now();
 
     updateCamera(deltaTime);

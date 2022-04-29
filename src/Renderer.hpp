@@ -88,4 +88,5 @@ private:
     std::vector<PrimitiveInfo> m_primitiveInfos;
     std::vector<VkCommandBuffer> m_commandBuffers;
     std::unique_ptr<GUI> m_gui;
+    float m_fps;
 };
