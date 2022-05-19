@@ -12,6 +12,7 @@ add_executable(${_target} ${_source_list})
 
 # Includes, libraries, compile options
 find_package(Vulkan REQUIRED)
+message("Vulkan include dir " ${Vulkan_INCLUDE_DIR})
 add_subdirectory(submodules/glfw)
 set(TINYGLTF_HEADER_ONLY OFF CACHE INTERNAL "" FORCE)
 set(TINYGLTF_INSTALL OFF CACHE INTERNAL "" FORCE)
