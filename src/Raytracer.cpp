@@ -31,14 +31,15 @@ Raytracer::Raytracer(Context& context) :
     createFramebuffers();
     createSampler();
     createTextures();
-    createCommonDescriptorSetLayouts();
-    createTexturesDescriptorSetLayouts();
-    createGraphicsPipeline();
+    createCommonDescriptorSetLayout();
+    createMaterialDescriptorSetLayout();
+    createTexturesDescriptorSetLayout();
+    createPipeline();
     createDescriptorPool();
-    createUboDescriptorSets();
+    createCommonDescriptorSets();
     createTextureDescriptorSet();
     createUniformBuffer();
-    updateUboDescriptorSets();
+    updateCommonDescriptorSets();
     updateTexturesDescriptorSets();
     createVertexAndIndexBuffer();
     allocateCommandBuffers();
@@ -54,13 +55,13 @@ Raytracer::~Raytracer()
 
     vkDestroyBuffer(m_device, m_attributeBuffer, nullptr);
     vkFreeMemory(m_device, m_attributeBufferMemory, nullptr);
-    vkDestroyBuffer(m_device, m_uniformBuffer, nullptr);
-    vkFreeMemory(m_device, m_uniformBufferMemory, nullptr);
+    vkDestroyBuffer(m_device, m_commonUniformBuffer, nullptr);
+    vkFreeMemory(m_device, m_commonUniformBufferMemory, nullptr);
     vkDestroyDescriptorPool(m_device, m_descriptorPool, nullptr);
-    vkDestroyPipeline(m_device, m_graphicsPipeline, nullptr);
+    vkDestroyPipeline(m_device, m_pipeline, nullptr);
     vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
     vkDestroyDescriptorSetLayout(m_device, m_texturesDescriptorSetLayout, nullptr);
-    vkDestroyDescriptorSetLayout(m_device, m_uboDescriptorSetLayout, nullptr);
+    vkDestroyDescriptorSetLayout(m_device, m_commonDescriptorSetLayout, nullptr);
 
     for (const VkImageView& imageView : m_imageViews)
     {
@@ -132,7 +133,7 @@ bool Raytracer::render()
 
     {
         DebugMarker::beginLabel(cb, "Render", DebugMarker::blue);
-        vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
+        vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);
 
         VkDeviceSize offsets[] = {0};
         vkCmdBindVertexBuffers(cb, 0, 1, &m_attributeBuffer, offsets);
@@ -140,7 +141,7 @@ bool Raytracer::render()
         for (size_t i = 0; i < m_primitiveInfos.size(); ++i)
         {
             const PrimitiveInfo& primitiveInfo = m_primitiveInfos[i];
-            const std::vector<VkDescriptorSet> descriptorSets{m_uboDescriptorSets[imageIndex], m_texturesDescriptorSets[primitiveInfo.material]};
+            const std::vector<VkDescriptorSet> descriptorSets{m_commonDescriptorSets[imageIndex], m_texturesDescriptorSets[primitiveInfo.material]};
             vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0, ui32Size(descriptorSets), descriptorSets.data(), 0, nullptr);
             vkCmdDrawIndexed(cb, primitiveInfo.indexCount, 1, primitiveInfo.firstIndex, primitiveInfo.vertexCountOffset, 0);
         }
@@ -185,11 +186,11 @@ bool Raytracer::update(uint32_t imageIndex)
     updateCamera(deltaTime);
 
     void* dst;
-    VK_CHECK(vkMapMemory(m_device, m_uniformBufferMemory, imageIndex * c_uniformBufferSize, c_uniformBufferSize, 0, &dst));
+    VK_CHECK(vkMapMemory(m_device, m_commonUniformBufferMemory, imageIndex * c_uniformBufferSize, c_uniformBufferSize, 0, &dst));
     glm::mat4 scaleMatrix = glm::scale(glm::vec3(0.01f, 0.01f, 0.01f));
     const glm::mat4 wvpMatrix = m_camera.getProjectionMatrix() * m_camera.getViewMatrix() * scaleMatrix;
     std::memcpy(dst, &wvpMatrix[0], static_cast<size_t>(c_uniformBufferSize));
-    vkUnmapMemory(m_device, m_uniformBufferMemory);
+    vkUnmapMemory(m_device, m_commonUniformBufferMemory);
 
     return true;
 }
@@ -683,7 +684,7 @@ void Raytracer::createMipmaps(VkImage image, uint32_t mipLevels, glm::uvec2 imag
     endSingleTimeCommands(m_context.getGraphicsQueue(), command);
 }
 
-void Raytracer::createCommonDescriptorSetLayouts()
+void Raytracer::createCommonDescriptorSetLayout()
 {
     std::vector<VkDescriptorSetLayoutBinding> bindings(4);
     bindings[0].binding = 0;
@@ -718,11 +719,35 @@ void Raytracer::createCommonDescriptorSetLayouts()
     layoutInfo.bindingCount = ui32Size(bindings);
     layoutInfo.pBindings = bindings.data();
 
-    VK_CHECK(vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_uboDescriptorSetLayout));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, m_uboDescriptorSetLayout, "Desc set layout - UBO");
+    VK_CHECK(vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_commonDescriptorSetLayout));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, m_commonDescriptorSetLayout, "Desc set layout - Common");
 }
 
-void Raytracer::createTexturesDescriptorSetLayouts()
+void Raytracer::createMaterialDescriptorSetLayout()
+{
+    std::vector<VkDescriptorSetLayoutBinding> bindings(4);
+    bindings[0].binding = 0;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    bindings[0].descriptorCount = 1;
+    bindings[0].stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+    bindings[0].pImmutableSamplers = nullptr;
+    bindings[1].binding = 1;
+    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    bindings[1].descriptorCount = 1;
+    bindings[1].stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+    bindings[1].pImmutableSamplers = nullptr;
+
+    const std::vector<VkDescriptorSetLayoutBinding> bindings{bindings};
+    VkDescriptorSetLayoutCreateInfo layoutInfo{};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layoutInfo.bindingCount = ui32Size(bindings);
+    layoutInfo.pBindings = bindings.data();
+
+    VK_CHECK(vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_materialDescriptorSetLayout));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, m_materialDescriptorSetLayout, "Desc set layout - Material");
+}
+
+void Raytracer::createTexturesDescriptorSetLayout()
 {
     const uint32_t imageCount = 3;
     std::vector<VkDescriptorSetLayoutBinding> bindings(imageCount);
@@ -742,12 +767,12 @@ void Raytracer::createTexturesDescriptorSetLayouts()
     layoutInfo.pBindings = bindings.data();
 
     VK_CHECK(vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_texturesDescriptorSetLayout));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, m_uboDescriptorSetLayout, "Desc set layout - Texture");
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, m_commonDescriptorSetLayout, "Desc set layout - Texture");
 }
 
-void Raytracer::createGraphicsPipeline()
+void Raytracer::createPipeline()
 {
-    const std::array<VkDescriptorSetLayout, 2> descriptorSetLayouts{m_uboDescriptorSetLayout, m_texturesDescriptorSetLayout};
+    const std::vector<VkDescriptorSetLayout> descriptorSetLayouts{m_commonDescriptorSetLayout, m_materialDescriptorSetLayout, m_texturesDescriptorSetLayout};
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = ui32Size(descriptorSetLayouts);
@@ -756,158 +781,100 @@ void Raytracer::createGraphicsPipeline()
     VK_CHECK(vkCreatePipelineLayout(m_device, &pipelineLayoutInfo, nullptr, &m_pipelineLayout));
     DebugMarker::setObjectName(VK_OBJECT_TYPE_PIPELINE_LAYOUT, m_pipelineLayout, "Pipeline layout - Raytracer");
 
-    VkVertexInputBindingDescription vertexDescription{};
-    vertexDescription.binding = 0;
-    vertexDescription.stride = sizeof(Model::Vertex);
-    vertexDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-
-    std::vector<VkVertexInputAttributeDescription> attributeDescriptions(4);
-
-    attributeDescriptions[0].binding = 0;
-    attributeDescriptions[0].location = 0;
-    attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attributeDescriptions[0].offset = offsetof(Model::Vertex, position);
-
-    attributeDescriptions[1].binding = 0;
-    attributeDescriptions[1].location = 1;
-    attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-    attributeDescriptions[1].offset = offsetof(Model::Vertex, normal);
-
-    attributeDescriptions[2].binding = 0;
-    attributeDescriptions[2].location = 2;
-    attributeDescriptions[2].format = VK_FORMAT_R32G32_SFLOAT;
-    attributeDescriptions[2].offset = offsetof(Model::Vertex, uv);
-
-    attributeDescriptions[3].binding = 0;
-    attributeDescriptions[3].location = 3;
-    attributeDescriptions[3].format = VK_FORMAT_R32G32B32A32_SFLOAT;
-    attributeDescriptions[3].offset = offsetof(Model::Vertex, tangent);
-
-    VkPipelineVertexInputStateCreateInfo vertexInputState{};
-    vertexInputState.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertexInputState.vertexBindingDescriptionCount = 1;
-    vertexInputState.pVertexBindingDescriptions = &vertexDescription;
-    vertexInputState.vertexAttributeDescriptionCount = ui32Size(attributeDescriptions);
-    vertexInputState.pVertexAttributeDescriptions = attributeDescriptions.data();
-
-    VkPipelineInputAssemblyStateCreateInfo inputAssemblyState{};
-    inputAssemblyState.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    inputAssemblyState.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    inputAssemblyState.primitiveRestartEnable = VK_FALSE;
-
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = static_cast<float>(c_windowExtent.width);
-    viewport.height = static_cast<float>(c_windowExtent.height);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-
-    VkRect2D scissor{};
-    scissor.offset = {0, 0};
-    scissor.extent = c_windowExtent;
-
-    VkPipelineViewportStateCreateInfo viewportState{};
-    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewportState.viewportCount = 1;
-    viewportState.pViewports = &viewport;
-    viewportState.scissorCount = 1;
-    viewportState.pScissors = &scissor;
-
-    VkPipelineRasterizationStateCreateInfo rasterizationState{};
-    rasterizationState.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    rasterizationState.depthClampEnable = VK_FALSE;
-    rasterizationState.rasterizerDiscardEnable = VK_FALSE;
-    rasterizationState.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterizationState.lineWidth = 1.0f;
-    rasterizationState.cullMode = VK_CULL_MODE_BACK_BIT;
-    rasterizationState.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    rasterizationState.depthBiasEnable = VK_FALSE;
-    rasterizationState.depthBiasConstantFactor = 0.0f;
-    rasterizationState.depthBiasClamp = 0.0f;
-    rasterizationState.depthBiasSlopeFactor = 0.0f;
-
-    VkPipelineMultisampleStateCreateInfo multisampleState{};
-    multisampleState.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    multisampleState.sampleShadingEnable = VK_FALSE;
-    multisampleState.rasterizationSamples = c_msaaSampleCount;
-    multisampleState.minSampleShading = 1.0f;
-    multisampleState.pSampleMask = nullptr;
-    multisampleState.alphaToCoverageEnable = VK_FALSE;
-    multisampleState.alphaToOneEnable = VK_FALSE;
-
-    VkPipelineDepthStencilStateCreateInfo depthStencilState{};
-    depthStencilState.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencilState.depthTestEnable = VK_TRUE;
-    depthStencilState.depthWriteEnable = VK_TRUE;
-    depthStencilState.depthCompareOp = VK_COMPARE_OP_LESS;
-    depthStencilState.depthBoundsTestEnable = VK_FALSE;
-    depthStencilState.stencilTestEnable = VK_FALSE;
-
-    VkPipelineColorBlendAttachmentState colorBlendAttachmentState{};
-    colorBlendAttachmentState.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-    colorBlendAttachmentState.blendEnable = VK_FALSE;
-    colorBlendAttachmentState.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-    colorBlendAttachmentState.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-    colorBlendAttachmentState.colorBlendOp = VK_BLEND_OP_ADD;
-    colorBlendAttachmentState.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-    colorBlendAttachmentState.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-    colorBlendAttachmentState.alphaBlendOp = VK_BLEND_OP_ADD;
-
-    VkPipelineColorBlendStateCreateInfo colorBlendState{};
-    colorBlendState.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    colorBlendState.logicOpEnable = VK_FALSE;
-    colorBlendState.logicOp = VK_LOGIC_OP_COPY;
-    colorBlendState.attachmentCount = 1;
-    colorBlendState.pAttachments = &colorBlendAttachmentState;
-    colorBlendState.blendConstants[0] = 0.0f;
-    colorBlendState.blendConstants[1] = 0.0f;
-    colorBlendState.blendConstants[2] = 0.0f;
-    colorBlendState.blendConstants[3] = 0.0f;
-
     const std::filesystem::path currentPath = getCurrentExecutableDirectory();
-    VkShaderModule vertexShaderModule = createShaderModule(m_device, currentPath / "shader.vert.spv");
-    VkShaderModule fragmentShaderModule = createShaderModule(m_device, currentPath / "shader.frag.spv");
+    VkShaderModule closesHitShaderModule = createShaderModule(m_device, currentPath / "shader.rchit.spv");
+    VkShaderModule rayGenShaderModule = createShaderModule(m_device, currentPath / "shader.rgen.spv");
+    VkShaderModule missShaderModule = createShaderModule(m_device, currentPath / "shader.rmiss.spv");
+    VkShaderModule shadowMissShaderModule = createShaderModule(m_device, currentPath / "shader_shadow.rmiss.spv");
 
-    VkPipelineShaderStageCreateInfo vertexShaderStageInfo{};
-    vertexShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    vertexShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
-    vertexShaderStageInfo.module = vertexShaderModule;
-    vertexShaderStageInfo.pName = "main";
+    std::vector<VkPipelineShaderStageCreateInfo> pipelineShaderStageCreateInfoList(4);
 
-    VkPipelineShaderStageCreateInfo fragmentShaderStageInfo{};
-    fragmentShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    fragmentShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    fragmentShaderStageInfo.module = fragmentShaderModule;
-    fragmentShaderStageInfo.pName = "main";
+    pipelineShaderStageCreateInfoList[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    pipelineShaderStageCreateInfoList[0].pNext = NULL;
+    pipelineShaderStageCreateInfoList[0].flags = 0;
+    pipelineShaderStageCreateInfoList[0].stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+    pipelineShaderStageCreateInfoList[0].module = closesHitShaderModule;
+    pipelineShaderStageCreateInfoList[0].pName = "main";
+    pipelineShaderStageCreateInfoList[0].pSpecializationInfo = NULL;
+    pipelineShaderStageCreateInfoList[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    pipelineShaderStageCreateInfoList[1].pNext = NULL;
+    pipelineShaderStageCreateInfoList[1].flags = 0;
+    pipelineShaderStageCreateInfoList[1].stage = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+    pipelineShaderStageCreateInfoList[1].module = rayGenShaderModule;
+    pipelineShaderStageCreateInfoList[1].pName = "main";
+    pipelineShaderStageCreateInfoList[1].pSpecializationInfo = NULL;
+    pipelineShaderStageCreateInfoList[2].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    pipelineShaderStageCreateInfoList[2].pNext = NULL;
+    pipelineShaderStageCreateInfoList[2].flags = 0;
+    pipelineShaderStageCreateInfoList[2].stage = VK_SHADER_STAGE_MISS_BIT_KHR;
+    pipelineShaderStageCreateInfoList[2].module = missShaderModule;
+    pipelineShaderStageCreateInfoList[2].pName = "main";
+    pipelineShaderStageCreateInfoList[2].pSpecializationInfo = NULL;
+    pipelineShaderStageCreateInfoList[3].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    pipelineShaderStageCreateInfoList[3].pNext = NULL;
+    pipelineShaderStageCreateInfoList[3].flags = 0;
+    pipelineShaderStageCreateInfoList[3].stage = VK_SHADER_STAGE_MISS_BIT_KHR;
+    pipelineShaderStageCreateInfoList[3].module = shadowMissShaderModule;
+    pipelineShaderStageCreateInfoList[3].pName = "main";
+    pipelineShaderStageCreateInfoList[3].pSpecializationInfo = NULL;
 
-    std::vector<VkPipelineShaderStageCreateInfo> shaderStages{vertexShaderStageInfo, fragmentShaderStageInfo};
+    std::vector<VkRayTracingShaderGroupCreateInfoKHR> rayTracingShaderGroupCreateInfoList(4);
 
-    VkGraphicsPipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pipelineInfo.stageCount = ui32Size(shaderStages);
-    pipelineInfo.pStages = shaderStages.data();
-    pipelineInfo.pVertexInputState = &vertexInputState;
-    pipelineInfo.pInputAssemblyState = &inputAssemblyState;
-    pipelineInfo.pViewportState = &viewportState;
-    pipelineInfo.pRasterizationState = &rasterizationState;
-    pipelineInfo.pMultisampleState = &multisampleState;
-    pipelineInfo.pDepthStencilState = &depthStencilState;
-    pipelineInfo.pColorBlendState = &colorBlendState;
-    pipelineInfo.pDynamicState = nullptr;
-    pipelineInfo.layout = m_pipelineLayout;
-    pipelineInfo.renderPass = m_renderPass;
-    pipelineInfo.subpass = 0;
-    pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
-    pipelineInfo.basePipelineIndex = -1;
+    rayTracingShaderGroupCreateInfoList[0].sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+    rayTracingShaderGroupCreateInfoList[0].pNext = NULL;
+    rayTracingShaderGroupCreateInfoList[0].type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
+    rayTracingShaderGroupCreateInfoList[0].generalShader = VK_SHADER_UNUSED_KHR;
+    rayTracingShaderGroupCreateInfoList[0].closestHitShader = 0;
+    rayTracingShaderGroupCreateInfoList[0].anyHitShader = VK_SHADER_UNUSED_KHR;
+    rayTracingShaderGroupCreateInfoList[0].intersectionShader = VK_SHADER_UNUSED_KHR;
+    rayTracingShaderGroupCreateInfoList[0].pShaderGroupCaptureReplayHandle = NULL;
+    rayTracingShaderGroupCreateInfoList[1].sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+    rayTracingShaderGroupCreateInfoList[1].pNext = NULL;
+    rayTracingShaderGroupCreateInfoList[1].type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+    rayTracingShaderGroupCreateInfoList[1].generalShader = 1;
+    rayTracingShaderGroupCreateInfoList[1].closestHitShader = VK_SHADER_UNUSED_KHR;
+    rayTracingShaderGroupCreateInfoList[1].anyHitShader = VK_SHADER_UNUSED_KHR;
+    rayTracingShaderGroupCreateInfoList[1].intersectionShader = VK_SHADER_UNUSED_KHR;
+    rayTracingShaderGroupCreateInfoList[1].pShaderGroupCaptureReplayHandle = NULL;
+    rayTracingShaderGroupCreateInfoList[2].sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+    rayTracingShaderGroupCreateInfoList[2].pNext = NULL;
+    rayTracingShaderGroupCreateInfoList[2].type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+    rayTracingShaderGroupCreateInfoList[2].generalShader = 2;
+    rayTracingShaderGroupCreateInfoList[2].closestHitShader = VK_SHADER_UNUSED_KHR;
+    rayTracingShaderGroupCreateInfoList[2].anyHitShader = VK_SHADER_UNUSED_KHR;
+    rayTracingShaderGroupCreateInfoList[2].intersectionShader = VK_SHADER_UNUSED_KHR;
+    rayTracingShaderGroupCreateInfoList[2].pShaderGroupCaptureReplayHandle = NULL;
+    rayTracingShaderGroupCreateInfoList[3].sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+    rayTracingShaderGroupCreateInfoList[3].pNext = NULL;
+    rayTracingShaderGroupCreateInfoList[3].type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+    rayTracingShaderGroupCreateInfoList[3].generalShader = 3;
+    rayTracingShaderGroupCreateInfoList[3].closestHitShader = VK_SHADER_UNUSED_KHR;
+    rayTracingShaderGroupCreateInfoList[3].anyHitShader = VK_SHADER_UNUSED_KHR;
+    rayTracingShaderGroupCreateInfoList[3].intersectionShader = VK_SHADER_UNUSED_KHR;
+    rayTracingShaderGroupCreateInfoList[3].pShaderGroupCaptureReplayHandle = NULL;
 
-    VK_CHECK(vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_graphicsPipeline));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_PIPELINE, m_graphicsPipeline, "Pipeline - Raytracer");
+    VkRayTracingPipelineCreateInfoKHR rayTracingPipelineCreateInfo{};
+    rayTracingPipelineCreateInfo.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
+    rayTracingPipelineCreateInfo.pNext = NULL;
+    rayTracingPipelineCreateInfo.flags = 0;
+    rayTracingPipelineCreateInfo.stageCount = 4;
+    rayTracingPipelineCreateInfo.pStages = pipelineShaderStageCreateInfoList.data();
+    rayTracingPipelineCreateInfo.groupCount = 4;
+    rayTracingPipelineCreateInfo.pGroups = rayTracingShaderGroupCreateInfoList.data();
+    rayTracingPipelineCreateInfo.maxPipelineRayRecursionDepth = 1;
+    rayTracingPipelineCreateInfo.pLibraryInfo = NULL;
+    rayTracingPipelineCreateInfo.pLibraryInterface = NULL;
+    rayTracingPipelineCreateInfo.pDynamicState = NULL;
+    rayTracingPipelineCreateInfo.layout = m_pipelineLayout;
+    rayTracingPipelineCreateInfo.basePipelineHandle = VK_NULL_HANDLE;
+    rayTracingPipelineCreateInfo.basePipelineIndex = 0;
 
-    for (const VkPipelineShaderStageCreateInfo& stage : shaderStages)
-    {
-        vkDestroyShaderModule(m_device, stage.module, nullptr);
-    }
+    VK_CHECK(vkCreateRayTracingPipelinesKHR(m_device, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &rayTracingPipelineCreateInfo, NULL, &m_pipeline));
+
+    vkDestroyShaderModule(m_device, closesHitShaderModule, nullptr);
+    vkDestroyShaderModule(m_device, rayGenShaderModule, nullptr);
+    vkDestroyShaderModule(m_device, missShaderModule, nullptr);
+    vkDestroyShaderModule(m_device, shadowMissShaderModule, nullptr);
 }
 
 void Raytracer::createDescriptorPool()
@@ -940,12 +907,12 @@ void Raytracer::createDescriptorPool()
     DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_POOL, m_descriptorPool, "Descriptor pool - Raytracer");
 }
 
-void Raytracer::createUboDescriptorSets()
+void Raytracer::createCommonDescriptorSets()
 {
     const uint32_t swapchainLength = static_cast<uint32_t>(m_context.getSwapchainImages().size());
-    m_uboDescriptorSets.resize(swapchainLength);
+    m_commonDescriptorSets.resize(swapchainLength);
 
-    std::vector<VkDescriptorSetLayout> layouts(swapchainLength, m_uboDescriptorSetLayout);
+    std::vector<VkDescriptorSetLayout> layouts(swapchainLength, m_commonDescriptorSetLayout);
 
     VkDescriptorSetAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -953,11 +920,25 @@ void Raytracer::createUboDescriptorSets()
     allocInfo.descriptorSetCount = ui32Size(layouts);
     allocInfo.pSetLayouts = layouts.data();
 
-    VK_CHECK(vkAllocateDescriptorSets(m_device, &allocInfo, m_uboDescriptorSets.data()));
-    for (size_t i = 0; i < m_uboDescriptorSets.size(); ++i)
+    VK_CHECK(vkAllocateDescriptorSets(m_device, &allocInfo, m_commonDescriptorSets.data()));
+    for (size_t i = 0; i < m_commonDescriptorSets.size(); ++i)
     {
-        DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET, m_uboDescriptorSets[i], "Desc set - UBO " + std::to_string(i));
+        DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET, m_commonDescriptorSets[i], "Desc set - Common " + std::to_string(i));
     }
+}
+
+void Raytracer::createMaterialDescriptorSet()
+{
+    std::vector<VkDescriptorSetLayout> layouts(1, m_materialDescriptorSetLayout);
+
+    VkDescriptorSetAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.descriptorPool = m_descriptorPool;
+    allocInfo.descriptorSetCount = ui32Size(layouts);
+    allocInfo.pSetLayouts = layouts.data();
+
+    VK_CHECK(vkAllocateDescriptorSets(m_device, &allocInfo, &m_materialDescriptorSet));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET, &m_materialDescriptorSet, "Desc set - Material");
 }
 
 void Raytracer::createTextureDescriptorSet()
@@ -990,11 +971,11 @@ void Raytracer::createUniformBuffer()
     bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    VK_CHECK(vkCreateBuffer(m_device, &bufferInfo, nullptr, &m_uniformBuffer));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_BUFFER, m_uniformBuffer, "Buffer - Raytracer uniform buffer");
+    VK_CHECK(vkCreateBuffer(m_device, &bufferInfo, nullptr, &m_commonUniformBuffer));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_BUFFER, m_commonUniformBuffer, "Buffer - Raytracer common uniform buffer");
 
     VkMemoryRequirements memRequirements;
-    vkGetBufferMemoryRequirements(m_device, m_uniformBuffer, &memRequirements);
+    vkGetBufferMemoryRequirements(m_device, m_commonUniformBuffer, &memRequirements);
 
     const MemoryTypeResult memoryTypeResult = findMemoryType(m_context.getPhysicalDevice(), memRequirements.memoryTypeBits, memoryProperties);
     CHECK(memoryTypeResult.found);
@@ -1004,25 +985,25 @@ void Raytracer::createUniformBuffer()
     allocInfo.allocationSize = memRequirements.size;
     allocInfo.memoryTypeIndex = memoryTypeResult.typeIndex;
 
-    VK_CHECK(vkAllocateMemory(m_device, &allocInfo, nullptr, &m_uniformBufferMemory));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_uniformBufferMemory, "Memory - Raytracer uniform buffer");
+    VK_CHECK(vkAllocateMemory(m_device, &allocInfo, nullptr, &m_commonUniformBufferMemory));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_commonUniformBufferMemory, "Memory - Raytracer common uniform buffer");
 
-    VK_CHECK(vkBindBufferMemory(m_device, m_uniformBuffer, m_uniformBufferMemory, 0));
+    VK_CHECK(vkBindBufferMemory(m_device, m_commonUniformBuffer, m_commonUniformBufferMemory, 0));
 }
 
-void Raytracer::updateUboDescriptorSets()
+void Raytracer::updateCommonDescriptorSets()
 {
     VkDescriptorBufferInfo bufferInfo{};
-    bufferInfo.buffer = m_uniformBuffer;
+    bufferInfo.buffer = m_commonUniformBuffer;
     bufferInfo.range = c_uniformBufferSize;
 
-    std::vector<VkWriteDescriptorSet> descriptorWrites(m_uboDescriptorSets.size());
+    std::vector<VkWriteDescriptorSet> descriptorWrites(m_commonDescriptorSets.size());
 
-    for (size_t i = 0; i < m_uboDescriptorSets.size(); ++i)
+    for (size_t i = 0; i < m_commonDescriptorSets.size(); ++i)
     {
         bufferInfo.offset = i * c_uniformBufferSize;
         descriptorWrites[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[i].dstSet = m_uboDescriptorSets[i];
+        descriptorWrites[i].dstSet = m_commonDescriptorSets[i];
         descriptorWrites[i].dstBinding = 0;
         descriptorWrites[i].dstArrayElement = 0;
         descriptorWrites[i].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
