@@ -12,7 +12,6 @@ add_executable(${_target} ${_source_list})
 
 # Includes, libraries, compile options
 find_package(Vulkan REQUIRED)
-message("Vulkan include dir " ${Vulkan_INCLUDE_DIR})
 add_subdirectory(submodules/glfw)
 set(TINYGLTF_HEADER_ONLY OFF CACHE INTERNAL "" FORCE)
 set(TINYGLTF_INSTALL OFF CACHE INTERNAL "" FORCE)
@@ -37,7 +36,7 @@ function(add_shader TARGET SHADER)
 
     add_custom_command(
            OUTPUT ${_shader_output_path}
-           COMMAND ${GLSLC} -o ${_shader_output_path} ${_shader_src_path}
+           COMMAND ${GLSLC} --target-env=vulkan1.2 -o ${_shader_output_path} ${_shader_src_path}
            DEPENDS ${_shader_src_path}
            IMPLICIT_DEPENDS CXX ${_shader_src_path}
            VERBATIM)

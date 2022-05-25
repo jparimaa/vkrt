@@ -29,6 +29,7 @@ private:
 
     bool update(uint32_t imageIndex);
 
+    void getFunctionPointers();
     void loadModel();
     void releaseModel();
     void setupCamera();
@@ -54,12 +55,15 @@ private:
     void updateMaterialDescriptorSet();
     void updateTexturesDescriptorSets();
     void createVertexAndIndexBuffer();
+    void createBLAS();
     void allocateCommandBuffers();
     void initializeGUI();
 
     Context& m_context;
     VkDevice m_device;
 
+    PFN_vkCreateRayTracingPipelinesKHR m_pvkCreateRayTracingPipelinesKHR;
+    PFN_vkGetBufferDeviceAddressKHR m_pvkGetBufferDeviceAddressKHR;
     std::unique_ptr<Model> m_model{nullptr};
     Camera m_camera;
     std::chrono::steady_clock::time_point m_lastRenderTime;
