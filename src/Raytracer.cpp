@@ -40,7 +40,7 @@ Raytracer::Raytracer(Context& context) :
     createCommonDescriptorSets();
     createTextureDescriptorSet();
     createUniformBuffer();
-    updateCommonDescriptorSets();
+    //updateCommonDescriptorSets();
     updateMaterialDescriptorSet();
     updateTexturesDescriptorSets();
     createVertexAndIndexBuffer();
@@ -711,12 +711,12 @@ void Raytracer::createCommonDescriptorSetLayout()
     bindings[2].binding = 2;
     bindings[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     bindings[2].descriptorCount = 1;
-    bindings[2].stageFlags = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    bindings[2].stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
     bindings[2].pImmutableSamplers = nullptr;
     bindings[3].binding = 3;
     bindings[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     bindings[3].descriptorCount = 1;
-    bindings[3].stageFlags = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    bindings[3].stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
     bindings[3].pImmutableSamplers = nullptr;
     bindings[4].binding = 4;
     bindings[4].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
@@ -735,14 +735,14 @@ void Raytracer::createCommonDescriptorSetLayout()
 
 void Raytracer::createMaterialDescriptorSetLayout()
 {
-    std::vector<VkDescriptorSetLayoutBinding> bindings(4);
+    std::vector<VkDescriptorSetLayoutBinding> bindings(2);
     bindings[0].binding = 0;
-    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     bindings[0].descriptorCount = 1;
     bindings[0].stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
     bindings[0].pImmutableSamplers = nullptr;
     bindings[1].binding = 1;
-    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     bindings[1].descriptorCount = 1;
     bindings[1].stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
     bindings[1].pImmutableSamplers = nullptr;
@@ -776,7 +776,7 @@ void Raytracer::createTexturesDescriptorSetLayout()
     layoutInfo.pBindings = bindings.data();
 
     VK_CHECK(vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_texturesDescriptorSetLayout));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, m_commonDescriptorSetLayout, "Desc set layout - Texture");
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, m_texturesDescriptorSetLayout, "Desc set layout - Texture");
 }
 
 void Raytracer::createPipeline()
@@ -1102,7 +1102,8 @@ void Raytracer::createVertexAndIndexBuffer()
     bufferInfo.usage = //
         VK_BUFFER_USAGE_TRANSFER_DST_BIT | //
         VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | //
-        VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+        VK_BUFFER_USAGE_INDEX_BUFFER_BIT | //
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VK_CHECK(vkCreateBuffer(m_device, &bufferInfo, nullptr, &m_attributeBuffer));
@@ -1110,13 +1111,20 @@ void Raytracer::createVertexAndIndexBuffer()
 
     VkMemoryRequirements memRequirements;
     vkGetBufferMemoryRequirements(m_device, m_attributeBuffer, &memRequirements);
-
+    VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
     const VkMemoryPropertyFlags memoryProperties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
     const MemoryTypeResult memoryTypeResult = findMemoryType(physicalDevice, memRequirements.memoryTypeBits, memoryProperties);
     CHECK(memoryTypeResult.found);
 
+    VkMemoryAllocateFlagsInfo memoryAllocateFlagsInfo{};
+    memoryAllocateFlagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+    memoryAllocateFlagsInfo.pNext = NULL;
+    memoryAllocateFlagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+    memoryAllocateFlagsInfo.deviceMask = 0;
+
     VkMemoryAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    allocInfo.pNext = &memoryAllocateFlagsInfo;
     allocInfo.allocationSize = memRequirements.size;
     allocInfo.memoryTypeIndex = memoryTypeResult.typeIndex;
 
