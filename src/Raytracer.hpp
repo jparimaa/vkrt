@@ -66,6 +66,8 @@ private:
     PFN_vkGetBufferDeviceAddressKHR m_pvkGetBufferDeviceAddressKHR;
     PFN_vkGetAccelerationStructureBuildSizesKHR m_pvkGetAccelerationStructureBuildSizesKHR;
     PFN_vkCreateAccelerationStructureKHR m_pvkCreateAccelerationStructureKHR;
+    PFN_vkGetAccelerationStructureDeviceAddressKHR m_pvkGetAccelerationStructureDeviceAddressKHR;
+
     std::unique_ptr<Model> m_model{nullptr};
     Camera m_camera;
     std::chrono::steady_clock::time_point m_lastRenderTime;
@@ -100,6 +102,8 @@ private:
     VkBuffer m_blasBuffer;
     VkDeviceMemory m_blasMemory;
     VkAccelerationStructureKHR m_blas;
+    VkBuffer m_blasScratchBuffer;
+    VkDeviceMemory m_blasScratchMemory;
     std::vector<VkCommandBuffer> m_commandBuffers;
     std::unique_ptr<GUI> m_gui;
     float m_fps;
