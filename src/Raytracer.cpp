@@ -217,6 +217,8 @@ void Raytracer::getFunctionPointers()
     CHECK(m_pvkCreateAccelerationStructureKHR);
     m_pvkGetAccelerationStructureDeviceAddressKHR = (PFN_vkGetAccelerationStructureDeviceAddressKHR)vkGetDeviceProcAddr(m_device, "vkGetAccelerationStructureDeviceAddressKHR");
     CHECK(m_pvkGetAccelerationStructureDeviceAddressKHR);
+    m_pvkCmdBuildAccelerationStructuresKHR = (PFN_vkCmdBuildAccelerationStructuresKHR)vkGetDeviceProcAddr(m_device, "vkCmdBuildAccelerationStructuresKHR");
+    CHECK(m_pvkCmdBuildAccelerationStructuresKHR);
 }
 
 void Raytracer::loadModel()
@@ -1306,77 +1308,14 @@ void Raytracer::createBLAS()
     blasBuildRangeInfo.firstVertex = 0;
     blasBuildRangeInfo.transformOffset = 0;
 
+    const SingleTimeCommand command = beginSingleTimeCommands(m_context.getGraphicsCommandPool(), m_device);
+    const VkCommandBuffer& cb = command.commandBuffer;
+
     const VkAccelerationStructureBuildRangeInfoKHR* blasBuildRangeInfos = &blasBuildRangeInfo;
 
-    VkCommandBufferBeginInfo bottomLevelCommandBufferBeginInfo = {
-        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
-        .pNext = NULL,
-        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
-        .pInheritanceInfo = NULL};
+    m_pvkCmdBuildAccelerationStructuresKHR(cb, 1, &blasBuildGeometryInfo, &blasBuildRangeInfos);
 
-    result = vkBeginCommandBuffer(commandBufferHandleList.back(),
-                                  &bottomLevelCommandBufferBeginInfo);
-
-    if (result != VK_SUCCESS)
-    {
-        throwExceptionVulkanAPI(result, "vkBeginCommandBuffer");
-    }
-
-    pvkCmdBuildAccelerationStructuresKHR(
-        commandBufferHandleList.back(),
-        1,
-        &blasBuildGeometryInfo,
-        &blasBuildRangeInfos);
-
-    result = vkEndCommandBuffer(commandBufferHandleList.back());
-
-    if (result != VK_SUCCESS)
-    {
-        throwExceptionVulkanAPI(result, "vkEndCommandBuffer");
-    }
-
-    VkSubmitInfo blasBuildSubmitInfo = {
-        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-        .pNext = NULL,
-        .waitSemaphoreCount = 0,
-        .pWaitSemaphores = NULL,
-        .pWaitDstStageMask = NULL,
-        .commandBufferCount = 1,
-        .pCommandBuffers = &commandBufferHandleList.back(),
-        .signalSemaphoreCount = 0,
-        .pSignalSemaphores = NULL};
-
-    VkFenceCreateInfo blasBuildFenceCreateInfo = {
-        .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO,
-        .pNext = NULL,
-        .flags = 0};
-
-    VkFence blasBuildFenceHandle = VK_NULL_HANDLE;
-    result = vkCreateFence(
-        deviceHandle,
-        &blasBuildFenceCreateInfo,
-        NULL,
-        &blasBuildFenceHandle);
-
-    if (result != VK_SUCCESS)
-    {
-        throwExceptionVulkanAPI(result, "vkCreateFence");
-    }
-
-    result = vkQueueSubmit(queueHandle, 1, &blasBuildSubmitInfo, blasBuildFenceHandle);
-
-    if (result != VK_SUCCESS)
-    {
-        throwExceptionVulkanAPI(result, "vkQueueSubmit");
-    }
-
-    result = vkWaitForFences(deviceHandle, 1, &blasBuildFenceHandle, true, UINT32_MAX);
-
-    if (result != VK_SUCCESS && result != VK_TIMEOUT)
-    {
-        throwExceptionVulkanAPI(result, "vkWaitForFences");
-    }
-    * /
+    endSingleTimeCommands(m_context.getGraphicsQueue(), command);
 }
 
 void Raytracer::allocateCommandBuffers()

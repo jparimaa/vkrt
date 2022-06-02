@@ -67,6 +67,7 @@ private:
     PFN_vkGetAccelerationStructureBuildSizesKHR m_pvkGetAccelerationStructureBuildSizesKHR;
     PFN_vkCreateAccelerationStructureKHR m_pvkCreateAccelerationStructureKHR;
     PFN_vkGetAccelerationStructureDeviceAddressKHR m_pvkGetAccelerationStructureDeviceAddressKHR;
+    PFN_vkCmdBuildAccelerationStructuresKHR m_pvkCmdBuildAccelerationStructuresKHR;
 
     std::unique_ptr<Model> m_model{nullptr};
     Camera m_camera;
