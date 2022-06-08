@@ -1230,20 +1230,22 @@ void Raytracer::createBLAS()
 
     VK_CHECK(vkCreateBuffer(m_device, &blasBufferCreateInfo, NULL, &m_blasBuffer));
 
-    VkMemoryRequirements memoryRequirements{};
-    vkGetBufferMemoryRequirements(m_device, m_blasBuffer, &memoryRequirements);
+    {
+        VkMemoryRequirements memoryRequirements{};
+        vkGetBufferMemoryRequirements(m_device, m_blasBuffer, &memoryRequirements);
 
-    const MemoryTypeResult memoryTypeResult = findMemoryType(m_context.getPhysicalDevice(), memoryRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    CHECK(memoryTypeResult.found);
+        const MemoryTypeResult memoryTypeResult = findMemoryType(m_context.getPhysicalDevice(), memoryRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        CHECK(memoryTypeResult.found);
 
-    VkMemoryAllocateInfo memoryAllocateInfo{};
-    memoryAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    memoryAllocateInfo.pNext = NULL;
-    memoryAllocateInfo.allocationSize = memoryRequirements.size;
-    memoryAllocateInfo.memoryTypeIndex = memoryTypeResult.typeIndex;
+        VkMemoryAllocateInfo memoryAllocateInfo{};
+        memoryAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        memoryAllocateInfo.pNext = NULL;
+        memoryAllocateInfo.allocationSize = memoryRequirements.size;
+        memoryAllocateInfo.memoryTypeIndex = memoryTypeResult.typeIndex;
 
-    VK_CHECK(vkAllocateMemory(m_device, &memoryAllocateInfo, NULL, &m_blasMemory));
-    VK_CHECK(vkBindBufferMemory(m_device, m_blasBuffer, m_blasMemory, 0));
+        VK_CHECK(vkAllocateMemory(m_device, &memoryAllocateInfo, NULL, &m_blasMemory));
+        VK_CHECK(vkBindBufferMemory(m_device, m_blasBuffer, m_blasMemory, 0));
+    }
 
     // Create BLAS
     VkAccelerationStructureCreateInfoKHR blasCreateInfo{};
@@ -1263,7 +1265,7 @@ void Raytracer::createBLAS()
     blasDeviceAddressInfo.pNext = NULL;
     blasDeviceAddressInfo.accelerationStructure = m_blas;
 
-    const VkDeviceAddress blasDeviceAddress = m_pvkGetAccelerationStructureDeviceAddressKHR(m_device, &blasDeviceAddressInfo);
+    m_blasDeviceAddress = m_pvkGetAccelerationStructureDeviceAddressKHR(m_device, &blasDeviceAddressInfo);
 
     // Create BLAS scratch buffer
     VkBufferCreateInfo blasScratchBufferCreateInfo{};
@@ -1276,20 +1278,22 @@ void Raytracer::createBLAS()
 
     VK_CHECK(vkCreateBuffer(m_device, &blasScratchBufferCreateInfo, NULL, &m_blasScratchBuffer));
 
-    VkMemoryRequirements memoryRequirements;
-    vkGetBufferMemoryRequirements(m_device, m_blasScratchBuffer, &memoryRequirements);
+    {
+        VkMemoryRequirements memoryRequirements{};
+        vkGetBufferMemoryRequirements(m_device, m_blasScratchBuffer, &memoryRequirements);
 
-    const MemoryTypeResult memoryTypeResult = findMemoryType(m_context.getPhysicalDevice(), memoryRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    CHECK(memoryTypeResult.found);
+        const MemoryTypeResult memoryTypeResult = findMemoryType(m_context.getPhysicalDevice(), memoryRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        CHECK(memoryTypeResult.found);
 
-    VkMemoryAllocateInfo memoryAllocateInfo{};
-    memoryAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    memoryAllocateInfo.pNext = &c_memoryAllocateFlagsInfo;
-    memoryAllocateInfo.allocationSize = memoryRequirements.size;
-    memoryAllocateInfo.memoryTypeIndex = memoryTypeResult.typeIndex;
+        VkMemoryAllocateInfo memoryAllocateInfo{};
+        memoryAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        memoryAllocateInfo.pNext = &c_memoryAllocateFlagsInfo;
+        memoryAllocateInfo.allocationSize = memoryRequirements.size;
+        memoryAllocateInfo.memoryTypeIndex = memoryTypeResult.typeIndex;
 
-    VK_CHECK(vkAllocateMemory(m_device, &memoryAllocateInfo, NULL, &m_blasScratchMemory));
-    VK_CHECK(vkBindBufferMemory(m_device, m_blasScratchBuffer, m_blasScratchMemory, 0));
+        VK_CHECK(vkAllocateMemory(m_device, &memoryAllocateInfo, NULL, &m_blasScratchMemory));
+        VK_CHECK(vkBindBufferMemory(m_device, m_blasScratchBuffer, m_blasScratchMemory, 0));
+    }
 
     VkBufferDeviceAddressInfo blasScratchBufferDeviceAddressInfo{};
     blasScratchBufferDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
@@ -1316,6 +1320,103 @@ void Raytracer::createBLAS()
     m_pvkCmdBuildAccelerationStructuresKHR(cb, 1, &blasBuildGeometryInfo, &blasBuildRangeInfos);
 
     endSingleTimeCommands(m_context.getGraphicsQueue(), command);
+}
+
+void Raytracer::createTLAS()
+{
+    VkAccelerationStructureInstanceKHR blasInstance{};
+    blasInstance.transform.matrix = {{1.0f, 0.0f, 0.0f, 0.0f},
+                                     {0.0f, 1.0f, 0.0f, 0.0f},
+                                     {0.0f, 0.0f, 1.0f, 0.0f}};
+    blasInstance.instanceCustomIndex = 0;
+    blasInstance.mask = 0xFF;
+    blasInstance.instanceShaderBindingTableRecordOffset = 0;
+    blasInstance.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+    blasInstance.accelerationStructureReference = m_blasDeviceAddress;
+
+    VkBufferCreateInfo blasGeometryInstanceBufferCreateInfo{};
+    blasGeometryInstanceBufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    blasGeometryInstanceBufferCreateInfo.pNext = NULL;
+    blasGeometryInstanceBufferCreateInfo.flags = 0;
+    blasGeometryInstanceBufferCreateInfo.size = sizeof(VkAccelerationStructureInstanceKHR);
+    blasGeometryInstanceBufferCreateInfo.usage = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    blasGeometryInstanceBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VK_CHECK(vkCreateBuffer(m_device, &blasGeometryInstanceBufferCreateInfo, NULL, &m_blasGeometryInstanceBuffer));
+
+    {
+        VkMemoryRequirements memoryRequirements;
+        vkGetBufferMemoryRequirements(m_device, m_blasGeometryInstanceBuffer, &memoryRequirements);
+
+        const MemoryTypeResult memoryTypeResult = findMemoryType(m_context.getPhysicalDevice(), memoryRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+        CHECK(memoryTypeResult.found);
+
+        VkMemoryAllocateInfo memoryAllocateInfo{};
+        memoryAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        memoryAllocateInfo.pNext = &c_memoryAllocateFlagsInfo;
+        memoryAllocateInfo.allocationSize = memoryRequirements.size;
+        memoryAllocateInfo.memoryTypeIndex = memoryTypeResult.typeIndex;
+
+        VK_CHECK(vkAllocateMemory(m_device, &memoryAllocateInfo, NULL, &m_blasGeometryInstanceMemory));
+        VK_CHECK(vkBindBufferMemory(m_device, m_blasGeometryInstanceBuffer, m_blasGeometryInstanceMemory, 0));
+    }
+
+    void* hostBlasGeometryInstanceMemoryMapped;
+    VK_CHECK(vkMapMemory(m_device, m_blasGeometryInstanceMemory, 0, sizeof(VkAccelerationStructureInstanceKHR), 0, &hostBlasGeometryInstanceMemoryMapped));
+    memcpy(hostBlasGeometryInstanceMemoryMapped, &blasInstance, sizeof(VkAccelerationStructureInstanceKHR));
+    vkUnmapMemory(m_device, m_blasGeometryInstanceMemory);
+
+    VkBufferDeviceAddressInfo blasGeometryInstanceDeviceAddressInfo{};
+    blasGeometryInstanceDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+    blasGeometryInstanceDeviceAddressInfo.pNext = NULL;
+    blasGeometryInstanceDeviceAddressInfo.buffer = m_blasGeometryInstanceBuffer;
+
+    VkDeviceAddress blasGeometryInstanceDeviceAddress = m_pvkGetBufferDeviceAddressKHR(m_device, &blasGeometryInstanceDeviceAddressInfo);
+
+    VkAccelerationStructureGeometryDataKHR tlasGeometryData{};
+    tlasGeometryData.instances.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
+    tlasGeometryData.instances.pNext = NULL;
+    tlasGeometryData.instances.arrayOfPointers = VK_FALSE;
+    tlasGeometryData.instances.data.deviceAddress = blasGeometryInstanceDeviceAddress;
+
+    VkAccelerationStructureGeometryKHR tlasGeometry{};
+    tlasGeometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+    tlasGeometry.pNext = NULL;
+    tlasGeometry.geometryType = VK_GEOMETRY_TYPE_INSTANCES_KHR;
+    tlasGeometry.geometry = tlasGeometryData;
+    tlasGeometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+
+    VkAccelerationStructureBuildGeometryInfoKHR tlasBuildGeometryInfo{};
+    tlasBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
+    tlasBuildGeometryInfo.pNext = NULL;
+    tlasBuildGeometryInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    tlasBuildGeometryInfo.flags = 0;
+    tlasBuildGeometryInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
+    tlasBuildGeometryInfo.srcAccelerationStructure = VK_NULL_HANDLE;
+    tlasBuildGeometryInfo.dstAccelerationStructure = VK_NULL_HANDLE;
+    tlasBuildGeometryInfo.geometryCount = 1;
+    tlasBuildGeometryInfo.pGeometries = &tlasGeometry;
+    tlasBuildGeometryInfo.ppGeometries = NULL;
+    tlasBuildGeometryInfo.scratchData.deviceAddress = 0;
+
+    VkAccelerationStructureBuildSizesInfoKHR tlasBuildSizesInfo{};
+    tlasBuildSizesInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_SIZES_INFO_KHR;
+    tlasBuildSizesInfo.pNext = NULL;
+    tlasBuildSizesInfo.accelerationStructureSize = 0;
+    tlasBuildSizesInfo.updateScratchSize = 0;
+    tlasBuildSizesInfo.buildScratchSize = 0;
+
+    std::vector<uint32_t> topLevelMaxPrimitiveCountList = {1};
+
+    m_pvkGetAccelerationStructureBuildSizesKHR(m_device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &tlasBuildGeometryInfo, topLevelMaxPrimitiveCountList.data(), &tlasBuildSizesInfo);
+
+    VkBufferCreateInfo tlasBufferCreateInfo{};
+    tlasBufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    tlasBufferCreateInfo.pNext = NULL;
+    tlasBufferCreateInfo.flags = 0;
+    tlasBufferCreateInfo.size = tlasBuildSizesInfo.accelerationStructureSize;
+    tlasBufferCreateInfo.usage = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR;
+    tlasBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 }
 
 void Raytracer::allocateCommandBuffers()
