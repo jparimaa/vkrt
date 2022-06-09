@@ -101,14 +101,20 @@ private:
     VkBuffer m_attributeBuffer;
     VkDeviceMemory m_attributeBufferMemory;
     std::vector<PrimitiveInfo> m_primitiveInfos;
+
     VkBuffer m_blasBuffer;
     VkDeviceMemory m_blasMemory;
     VkAccelerationStructureKHR m_blas;
     VkDeviceAddress m_blasDeviceAddress;
     VkBuffer m_blasScratchBuffer;
     VkDeviceMemory m_blasScratchMemory;
+
     VkBuffer m_blasGeometryInstanceBuffer;
     VkDeviceMemory m_blasGeometryInstanceMemory;
+    VkBuffer m_tlasBuffer;
+    VkDeviceMemory m_tlasMemory;
+    VkAccelerationStructureKHR m_tlas;
+
     std::vector<VkCommandBuffer> m_commandBuffers;
     std::unique_ptr<GUI> m_gui;
     float m_fps;

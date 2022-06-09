@@ -1324,6 +1324,7 @@ void Raytracer::createBLAS()
 
 void Raytracer::createTLAS()
 {
+    // Setup BLAS instance buffer
     VkAccelerationStructureInstanceKHR blasInstance{};
     blasInstance.transform.matrix = {{1.0f, 0.0f, 0.0f, 0.0f},
                                      {0.0f, 1.0f, 0.0f, 0.0f},
@@ -1373,6 +1374,7 @@ void Raytracer::createTLAS()
 
     VkDeviceAddress blasGeometryInstanceDeviceAddress = m_pvkGetBufferDeviceAddressKHR(m_device, &blasGeometryInstanceDeviceAddressInfo);
 
+    // Setup TLAS build size info
     VkAccelerationStructureGeometryDataKHR tlasGeometryData{};
     tlasGeometryData.instances.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_INSTANCES_DATA_KHR;
     tlasGeometryData.instances.pNext = NULL;
@@ -1410,6 +1412,7 @@ void Raytracer::createTLAS()
 
     m_pvkGetAccelerationStructureBuildSizesKHR(m_device, VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR, &tlasBuildGeometryInfo, topLevelMaxPrimitiveCountList.data(), &tlasBuildSizesInfo);
 
+    // Create TLAS buffer
     VkBufferCreateInfo tlasBufferCreateInfo{};
     tlasBufferCreateInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     tlasBufferCreateInfo.pNext = NULL;
@@ -1417,6 +1420,38 @@ void Raytracer::createTLAS()
     tlasBufferCreateInfo.size = tlasBuildSizesInfo.accelerationStructureSize;
     tlasBufferCreateInfo.usage = VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR;
     tlasBufferCreateInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VK_CHECK(vkCreateBuffer(m_device, &tlasBufferCreateInfo, NULL, &m_tlasBuffer));
+
+    {
+        VkMemoryRequirements memoryRequirements;
+        vkGetBufferMemoryRequirements(m_device, m_tlasBuffer, &memoryRequirements);
+
+        const MemoryTypeResult memoryTypeResult = findMemoryType(m_context.getPhysicalDevice(), memoryRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        CHECK(memoryTypeResult.found);
+
+        VkMemoryAllocateInfo memoryAllocateInfo{};
+        memoryAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+        memoryAllocateInfo.pNext = NULL;
+        memoryAllocateInfo.allocationSize = memoryRequirements.size;
+        memoryAllocateInfo.memoryTypeIndex = memoryTypeResult.typeIndex;
+
+        VK_CHECK(vkAllocateMemory(m_device, &memoryAllocateInfo, NULL, &m_tlasMemory));
+        VK_CHECK(vkBindBufferMemory(m_device, m_tlasBuffer, m_tlasMemory, 0));
+    }
+
+    // Create TLAS
+    VkAccelerationStructureCreateInfoKHR tlasCreateInfo{};
+    tlasCreateInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_CREATE_INFO_KHR;
+    tlasCreateInfo.pNext = NULL;
+    tlasCreateInfo.createFlags = 0;
+    tlasCreateInfo.buffer = m_tlasBuffer;
+    tlasCreateInfo.offset = 0;
+    tlasCreateInfo.size = tlasBuildSizesInfo.accelerationStructureSize;
+    tlasCreateInfo.type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR;
+    tlasCreateInfo.deviceAddress = 0;
+
+    VK_CHECK(m_pvkCreateAccelerationStructureKHR(m_device, &tlasCreateInfo, NULL, &m_tlas));
 }
 
 void Raytracer::allocateCommandBuffers()
