@@ -283,3 +283,38 @@ void releaseStagingBuffer(VkDevice device, const StagingBuffer& buffer)
         vkFreeMemory(device, buffer.memory, nullptr);
     }
 }
+
+VkBuffer createBuffer(VkDevice device, VkDeviceSize size, VkBufferUsageFlags usageFlags)
+{
+    VkBufferCreateInfo createInfo{};
+    createInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    createInfo.pNext = NULL;
+    createInfo.flags = 0;
+    createInfo.size = size;
+    createInfo.usage = usageFlags;
+    createInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VkBuffer buffer;
+    VK_CHECK(vkCreateBuffer(device, &createInfo, NULL, &buffer));
+    return buffer;
+}
+
+VkDeviceMemory allocateAndBindMemory(VkDevice device, VkPhysicalDevice physicalDevice, VkBuffer buffer, VkMemoryPropertyFlagBits propertyFlags)
+{
+    VkMemoryRequirements memoryRequirements;
+    vkGetBufferMemoryRequirements(device, buffer, &memoryRequirements);
+
+    const MemoryTypeResult memoryTypeResult = findMemoryType(physicalDevice, memoryRequirements.memoryTypeBits, propertyFlags);
+    CHECK(memoryTypeResult.found);
+
+    VkMemoryAllocateInfo memoryAllocateInfo{};
+    memoryAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    memoryAllocateInfo.pNext = NULL;
+    memoryAllocateInfo.allocationSize = memoryRequirements.size;
+    memoryAllocateInfo.memoryTypeIndex = memoryTypeResult.typeIndex;
+
+    VkDeviceMemory memory;
+    VK_CHECK(vkAllocateMemory(device, &memoryAllocateInfo, NULL, &memory));
+    VK_CHECK(vkBindBufferMemory(device, buffer, memory, 0));
+    return memory;
+}

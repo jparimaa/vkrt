@@ -114,6 +114,8 @@ private:
     VkBuffer m_tlasBuffer;
     VkDeviceMemory m_tlasMemory;
     VkAccelerationStructureKHR m_tlas;
+    VkBuffer m_tlasScratchBuffer;
+    VkDeviceMemory m_tlasScratchMemory;
 
     std::vector<VkCommandBuffer> m_commandBuffers;
     std::unique_ptr<GUI> m_gui;

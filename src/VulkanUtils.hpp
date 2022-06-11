@@ -17,7 +17,7 @@ const std::vector<const char*> c_deviceExtensions = {
     VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME, //
     VK_KHR_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME, //
     VK_KHR_SPIRV_1_4_EXTENSION_NAME, //
-    VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME//
+    VK_KHR_SHADER_FLOAT_CONTROLS_EXTENSION_NAME //
 };
 
 const VkExtent2D c_windowExtent{c_windowWidth, c_windowHeight};
@@ -91,3 +91,5 @@ void endSingleTimeCommands(VkQueue queue, SingleTimeCommand command);
 VkShaderModule createShaderModule(VkDevice device, const std::filesystem::path& path);
 StagingBuffer createStagingBuffer(VkDevice device, VkPhysicalDevice physicalDevice, const void* data, uint64_t size);
 void releaseStagingBuffer(VkDevice device, const StagingBuffer& buffer);
+VkBuffer createBuffer(VkDevice device, VkDeviceSize size, VkBufferUsageFlags usageFlags);
+VkDeviceMemory allocateAndBindMemory(VkDevice device, VkPhysicalDevice physicalDevice, VkBuffer buffer, VkMemoryPropertyFlagBits propertyFlags);
