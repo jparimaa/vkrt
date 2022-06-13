@@ -12,7 +12,13 @@
 
 namespace
 {
-const size_t c_uniformBufferSize = sizeof(glm::mat4);
+struct UniformBufferInfo
+{
+    glm::mat4 wvp;
+    glm::mat4 camera;
+};
+
+const size_t c_uniformBufferSize = sizeof(UniformBufferInfo);
 const VkImageSubresourceRange c_defaultSubresourceRance{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
 const VkSampleCountFlagBits c_msaaSampleCount = VK_SAMPLE_COUNT_8_BIT;
 
@@ -43,9 +49,8 @@ Raytracer::Raytracer(Context& context) :
     createMaterialDescriptorSetLayout();
     createTexturesDescriptorSetLayout();
     createPipeline();
-    createDescriptorPool();
-    createCommonDescriptorSets();
-    createTextureDescriptorSet();
+    allocateCommonDescriptorSets();
+    allocateTextureDescriptorSets();
     createUniformBuffer();
     //updateCommonDescriptorSets();
     updateMaterialDescriptorSet();
@@ -197,9 +202,10 @@ bool Raytracer::update(uint32_t imageIndex)
 
     void* dst;
     VK_CHECK(vkMapMemory(m_device, m_commonUniformBufferMemory, imageIndex * c_uniformBufferSize, c_uniformBufferSize, 0, &dst));
-    glm::mat4 scaleMatrix = glm::scale(glm::vec3(0.01f, 0.01f, 0.01f));
-    const glm::mat4 wvpMatrix = m_camera.getProjectionMatrix() * m_camera.getViewMatrix() * scaleMatrix;
-    std::memcpy(dst, &wvpMatrix[0], static_cast<size_t>(c_uniformBufferSize));
+    UniformBufferInfo uniformBufferInfo{};
+    const glm::mat4 scaleMatrix = glm::scale(glm::vec3(0.01f, 0.01f, 0.01f));
+    uniformBufferInfo.wvp = m_camera.getProjectionMatrix() * m_camera.getViewMatrix() * scaleMatrix;
+    std::memcpy(dst, &uniformBufferInfo, static_cast<size_t>(c_uniformBufferSize));
     vkUnmapMemory(m_device, m_commonUniformBufferMemory);
 
     return true;
@@ -931,41 +937,30 @@ void Raytracer::createDescriptorPool()
     DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_POOL, m_descriptorPool, "Descriptor pool - Raytracer");
 }
 
-void Raytracer::createCommonDescriptorSets()
+void Raytracer::allocateCommonDescriptorSets()
 {
-    const uint32_t swapchainLength = static_cast<uint32_t>(m_context.getSwapchainImages().size());
-    m_commonDescriptorSets.resize(swapchainLength);
+    std::vector<VkDescriptorSetLayout> descriptorSetLayouts{
+        m_commonDescriptorSetLayout, //
+        m_materialDescriptorSetLayout //
+    };
 
-    std::vector<VkDescriptorSetLayout> layouts(swapchainLength, m_commonDescriptorSetLayout);
+    VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
+    descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    descriptorSetAllocateInfo.pNext = NULL;
+    descriptorSetAllocateInfo.descriptorPool = m_descriptorPool;
+    descriptorSetAllocateInfo.descriptorSetCount = ui32Size(descriptorSetLayouts);
+    descriptorSetAllocateInfo.pSetLayouts = descriptorSetLayouts.data();
 
-    VkDescriptorSetAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = m_descriptorPool;
-    allocInfo.descriptorSetCount = ui32Size(layouts);
-    allocInfo.pSetLayouts = layouts.data();
+    m_commonDescriptorSets.resize(ui32Size(descriptorSetLayouts));
 
-    VK_CHECK(vkAllocateDescriptorSets(m_device, &allocInfo, m_commonDescriptorSets.data()));
+    VK_CHECK(vkAllocateDescriptorSets(m_device, &descriptorSetAllocateInfo, m_commonDescriptorSets.data()));
     for (size_t i = 0; i < m_commonDescriptorSets.size(); ++i)
     {
         DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET, m_commonDescriptorSets[i], "Desc set - Common " + std::to_string(i));
     }
 }
 
-void Raytracer::createMaterialDescriptorSet()
-{
-    std::vector<VkDescriptorSetLayout> layouts(1, m_materialDescriptorSetLayout);
-
-    VkDescriptorSetAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = m_descriptorPool;
-    allocInfo.descriptorSetCount = ui32Size(layouts);
-    allocInfo.pSetLayouts = layouts.data();
-
-    VK_CHECK(vkAllocateDescriptorSets(m_device, &allocInfo, &m_materialDescriptorSet));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET, &m_materialDescriptorSet, "Desc set - Material");
-}
-
-void Raytracer::createTextureDescriptorSet()
+void Raytracer::allocateTextureDescriptorSets()
 {
     const size_t materialCount = m_model->materials.size();
     m_texturesDescriptorSets.resize(materialCount);

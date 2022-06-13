@@ -47,9 +47,8 @@ private:
     void createTexturesDescriptorSetLayout();
     void createPipeline();
     void createDescriptorPool();
-    void createCommonDescriptorSets();
-    void createMaterialDescriptorSet();
-    void createTextureDescriptorSet();
+    void allocateCommonDescriptorSets();
+    void allocateTextureDescriptorSets();
     void createUniformBuffer();
     void updateCommonDescriptorSets();
     void updateMaterialDescriptorSet();
@@ -94,7 +93,6 @@ private:
     VkPipeline m_pipeline;
     VkDescriptorPool m_descriptorPool;
     std::vector<VkDescriptorSet> m_commonDescriptorSets;
-    VkDescriptorSet m_materialDescriptorSet;
     std::vector<VkDescriptorSet> m_texturesDescriptorSets;
     VkBuffer m_commonUniformBuffer;
     VkDeviceMemory m_commonUniformBufferMemory;
