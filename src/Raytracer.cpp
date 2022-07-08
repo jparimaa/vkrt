@@ -38,11 +38,9 @@ Raytracer::Raytracer(Context& context) :
     getFunctionPointers();
     loadModel();
     setupCamera();
-    createRenderPass();
     createMsaaColorImage();
     createDepthImage();
     createSwapchainImageViews();
-    createFramebuffers();
     createSampler();
     createTextures();
     createCommonDescriptorSetLayout();
@@ -50,23 +48,21 @@ Raytracer::Raytracer(Context& context) :
     createTexturesDescriptorSetLayout();
     createPipeline();
     allocateCommonDescriptorSets();
+    allocateMaterialIndexDescriptorSets();
     allocateTextureDescriptorSets();
     createCommonUniformBuffer();
     updateCommonDescriptorSets();
-    updateMaterialDescriptorSet();
-    updateTexturesDescriptorSets();
+    //updateMaterialDescriptorSet();
+    //updateTexturesDescriptorSets();
     createVertexAndIndexBuffer();
     allocateCommandBuffers();
     createBLAS();
     releaseModel();
-    initializeGUI();
 }
 
 Raytracer::~Raytracer()
 {
     vkDeviceWaitIdle(m_device);
-
-    m_gui.reset();
 
     vkDestroyBuffer(m_device, m_attributeBuffer, nullptr);
     vkFreeMemory(m_device, m_attributeBufferMemory, nullptr);
@@ -92,11 +88,6 @@ Raytracer::~Raytracer()
 
     vkDestroySampler(m_device, m_sampler, nullptr);
 
-    for (const VkFramebuffer& framebuffer : m_framebuffers)
-    {
-        vkDestroyFramebuffer(m_device, framebuffer, nullptr);
-    }
-
     for (const VkImageView& imageView : m_swapchainImageViews)
     {
         vkDestroyImageView(m_device, imageView, nullptr);
@@ -109,8 +100,6 @@ Raytracer::~Raytracer()
     vkDestroyImageView(m_device, m_msaaColorImageView, nullptr);
     vkFreeMemory(m_device, m_msaaColorImageMemory, nullptr);
     vkDestroyImage(m_device, m_msaaColorImage, nullptr);
-
-    vkDestroyRenderPass(m_device, m_renderPass, nullptr);
 }
 
 bool Raytracer::render()
@@ -131,52 +120,16 @@ bool Raytracer::render()
     vkResetCommandBuffer(cb, VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT);
     vkBeginCommandBuffer(cb, &beginInfo);
 
-    std::array<VkClearValue, 2> clearValues{};
-    clearValues[0].color = {0.0f, 0.0f, 0.2f, 1.0f};
-    clearValues[1].depthStencil = {1.0f, 0};
-
-    VkRenderPassBeginInfo renderPassInfo{};
-    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    renderPassInfo.renderPass = m_renderPass;
-    renderPassInfo.framebuffer = m_framebuffers[imageIndex];
-    renderPassInfo.renderArea.offset = {0, 0};
-    renderPassInfo.renderArea.extent = c_windowExtent;
-    renderPassInfo.clearValueCount = ui32Size(clearValues);
-    renderPassInfo.pClearValues = clearValues.data();
-
-    vkCmdBeginRenderPass(cb, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-
     {
         DebugMarker::beginLabel(cb, "Render", DebugMarker::blue);
-        vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipeline);
+        vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_pipeline);
 
-        VkDeviceSize offsets[] = {0};
-        vkCmdBindVertexBuffers(cb, 0, 1, &m_attributeBuffer, offsets);
-        vkCmdBindIndexBuffer(cb, m_attributeBuffer, m_primitiveInfos[0].indexOffset, VK_INDEX_TYPE_UINT32);
-        for (size_t i = 0; i < m_primitiveInfos.size(); ++i)
-        {
-            const PrimitiveInfo& primitiveInfo = m_primitiveInfos[i];
-            const std::vector<VkDescriptorSet> descriptorSets{m_commonDescriptorSets[imageIndex], m_texturesDescriptorSets[primitiveInfo.material]};
-            vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0, ui32Size(descriptorSets), descriptorSets.data(), 0, nullptr);
-            vkCmdDrawIndexed(cb, primitiveInfo.indexCount, 1, primitiveInfo.firstIndex, primitiveInfo.vertexCountOffset, 0);
-        }
+        const std::vector<VkDescriptorSet> descriptorSets{m_commonDescriptorSets[0] /*, m_texturesDescriptorSets[primitiveInfo.material]*/};
+        vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0, ui32Size(descriptorSets), descriptorSets.data(), 0, nullptr);
 
+        m_pvkCmdTraceRaysKHR(cb, &m_rgenShaderBindingTable, &m_rmissShaderBindingTable, &m_rchitShaderBindingTable, &m_callableShaderBindingTable, c_windowWidth, c_windowHeight, 1);
         DebugMarker::endLabel(cb);
     }
-
-    {
-        DebugMarker::beginLabel(cb, "GUI");
-
-        m_gui->beginFrame();
-        ImGui::Begin("GUI");
-        ImGui::Text("FPS %f", m_fps);
-        ImGui::End();
-        m_gui->endFrame(cb, m_framebuffers[imageIndex]);
-
-        DebugMarker::endLabel(cb);
-    }
-
-    vkCmdEndRenderPass(cb);
 
     VK_CHECK(vkEndCommandBuffer(cb));
 
@@ -225,6 +178,10 @@ void Raytracer::getFunctionPointers()
     CHECK(m_pvkGetAccelerationStructureDeviceAddressKHR);
     m_pvkCmdBuildAccelerationStructuresKHR = (PFN_vkCmdBuildAccelerationStructuresKHR)vkGetDeviceProcAddr(m_device, "vkCmdBuildAccelerationStructuresKHR");
     CHECK(m_pvkCmdBuildAccelerationStructuresKHR);
+    m_pvkGetRayTracingShaderGroupHandlesKHR = (PFN_vkGetRayTracingShaderGroupHandlesKHR)vkGetDeviceProcAddr(m_device, "vkGetRayTracingShaderGroupHandlesKHR");
+    CHECK(m_pvkGetRayTracingShaderGroupHandlesKHR);
+    m_pvkCmdTraceRaysKHR = (PFN_vkCmdTraceRaysKHR)vkGetDeviceProcAddr(m_device, "vkCmdTraceRaysKHR");
+    CHECK(m_pvkCmdTraceRaysKHR);
 }
 
 void Raytracer::loadModel()
@@ -294,80 +251,6 @@ void Raytracer::updateCamera(double deltaTime)
     {
         m_camera.rotate(-c_up, rotationAmout);
     }
-}
-
-void Raytracer::createRenderPass()
-{
-    VkAttachmentReference colorAttachmentRef{};
-    colorAttachmentRef.attachment = 0;
-    colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-    VkAttachmentReference depthAttachmentRef{};
-    depthAttachmentRef.attachment = 1;
-    depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-    VkAttachmentReference colorAttachmentResolveRef{};
-    colorAttachmentResolveRef.attachment = 2;
-    colorAttachmentResolveRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-    VkSubpassDescription subpass{};
-    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpass.colorAttachmentCount = 1;
-    subpass.pColorAttachments = &colorAttachmentRef;
-    subpass.pDepthStencilAttachment = &depthAttachmentRef;
-    subpass.pResolveAttachments = &colorAttachmentResolveRef;
-
-    VkAttachmentDescription colorAttachment{};
-    colorAttachment.format = c_surfaceFormat.format;
-    colorAttachment.samples = c_msaaSampleCount;
-    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-    VkAttachmentDescription depthAttachment{};
-    depthAttachment.format = c_depthFormat;
-    depthAttachment.samples = c_msaaSampleCount;
-    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_STORE;
-    depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-    VkAttachmentDescription colorAttachmentResolve{};
-    colorAttachmentResolve.format = c_surfaceFormat.format;
-    colorAttachmentResolve.samples = VK_SAMPLE_COUNT_1_BIT;
-    colorAttachmentResolve.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    colorAttachmentResolve.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    colorAttachmentResolve.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    colorAttachmentResolve.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    colorAttachmentResolve.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    colorAttachmentResolve.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-
-    VkSubpassDependency dependency{};
-    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-    dependency.dstSubpass = 0;
-    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-    dependency.srcAccessMask = 0;
-    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-
-    const std::array<VkAttachmentDescription, 3> attachments = {colorAttachment, depthAttachment, colorAttachmentResolve};
-
-    VkRenderPassCreateInfo renderPassInfo{};
-    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    renderPassInfo.attachmentCount = ui32Size(attachments);
-    renderPassInfo.pAttachments = attachments.data();
-    renderPassInfo.subpassCount = 1;
-    renderPassInfo.pSubpasses = &subpass;
-    renderPassInfo.dependencyCount = 1;
-    renderPassInfo.pDependencies = &dependency;
-
-    VK_CHECK(vkCreateRenderPass(m_device, &renderPassInfo, nullptr, &m_renderPass));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_RENDER_PASS, m_renderPass, "Render pass - Main");
 }
 
 void Raytracer::createMsaaColorImage()
@@ -485,28 +368,6 @@ void Raytracer::createSwapchainImageViews()
         createInfo.subresourceRange = c_defaultSubresourceRance;
 
         VK_CHECK(vkCreateImageView(m_device, &createInfo, nullptr, &m_swapchainImageViews[i]));
-    }
-}
-
-void Raytracer::createFramebuffers()
-{
-    m_framebuffers.resize(m_swapchainImageViews.size());
-
-    VkFramebufferCreateInfo framebufferInfo{};
-    framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    framebufferInfo.renderPass = m_renderPass;
-    framebufferInfo.width = c_windowWidth;
-    framebufferInfo.height = c_windowHeight;
-    framebufferInfo.layers = 1;
-
-    for (size_t i = 0; i < m_swapchainImageViews.size(); ++i)
-    {
-        const std::array<VkImageView, 3> attachments = {m_msaaColorImageView, m_depthImageView, m_swapchainImageViews[i]};
-        framebufferInfo.attachmentCount = ui32Size(attachments);
-        framebufferInfo.pAttachments = attachments.data();
-
-        VK_CHECK(vkCreateFramebuffer(m_device, &framebufferInfo, nullptr, &m_framebuffers[i]));
-        DebugMarker::setObjectName(VK_OBJECT_TYPE_FRAMEBUFFER, m_framebuffers[i], "Framebuffer " + std::to_string(i));
     }
 }
 
@@ -762,11 +623,6 @@ void Raytracer::createMaterialDescriptorSetLayout()
     bindings[0].descriptorCount = 1;
     bindings[0].stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
     bindings[0].pImmutableSamplers = nullptr;
-    bindings[1].binding = 1;
-    bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    bindings[1].descriptorCount = 1;
-    bindings[1].stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
-    bindings[1].pImmutableSamplers = nullptr;
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -774,11 +630,12 @@ void Raytracer::createMaterialDescriptorSetLayout()
     layoutInfo.pBindings = bindings.data();
 
     VK_CHECK(vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_materialDescriptorSetLayout));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, m_materialDescriptorSetLayout, "Desc set layout - Material");
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, m_materialDescriptorSetLayout, "Desc set layout - Material Index");
 }
 
 void Raytracer::createTexturesDescriptorSetLayout()
 {
+    /*
     const uint32_t imageCount = 3;
     std::vector<VkDescriptorSetLayoutBinding> bindings(imageCount);
 
@@ -798,6 +655,7 @@ void Raytracer::createTexturesDescriptorSetLayout()
 
     VK_CHECK(vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_texturesDescriptorSetLayout));
     DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, m_texturesDescriptorSetLayout, "Desc set layout - Texture");
+    */
 }
 
 void Raytracer::createPipeline()
@@ -960,8 +818,13 @@ void Raytracer::allocateCommonDescriptorSets()
     }
 }
 
+void Raytracer::allocateMaterialIndexDescriptorSets()
+{
+}
+
 void Raytracer::allocateTextureDescriptorSets()
 {
+    /*
     const size_t materialCount = m_model->materials.size();
     m_texturesDescriptorSets.resize(materialCount);
     std::vector<VkDescriptorSetLayout> layouts(materialCount, m_texturesDescriptorSetLayout);
@@ -977,6 +840,7 @@ void Raytracer::allocateTextureDescriptorSets()
     {
         DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET, m_texturesDescriptorSets[i], "Desc set - Texture " + std::to_string(i));
     }
+    */
 }
 
 void Raytracer::createCommonUniformBuffer()
@@ -1232,6 +1096,19 @@ void Raytracer::createVertexAndIndexBuffer()
     releaseStagingBuffer(m_device, stagingBuffer);
 }
 
+void Raytracer::allocateCommandBuffers()
+{
+    m_commandBuffers.resize(m_swapchainImageViews.size());
+
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.commandPool = m_context.getGraphicsCommandPool();
+    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandBufferCount = ui32Size(m_commandBuffers);
+
+    VK_CHECK(vkAllocateCommandBuffers(m_device, &allocInfo, m_commandBuffers.data()));
+}
+
 void Raytracer::createBLAS()
 {
     const VkPhysicalDevice physicalDevice = m_context.getPhysicalDevice();
@@ -1357,10 +1234,16 @@ void Raytracer::createTLAS()
     const VkPhysicalDevice physicalDevice = m_context.getPhysicalDevice();
 
     // Setup BLAS instance buffer
+    // clang-format off
+    const std::vector<float> matrixData{
+        1.0f, 0.0f, 0.0f, 0.0f, 
+        0.0f, 1.0f, 0.0f, 0.0f,
+        0.0f, 0.0f, 1.0f, 0.0f
+    };
+    // clang-format on
     VkAccelerationStructureInstanceKHR blasInstance{};
-    blasInstance.transform.matrix = {{1.0f, 0.0f, 0.0f, 0.0f},
-                                     {0.0f, 1.0f, 0.0f, 0.0f},
-                                     {0.0f, 0.0f, 1.0f, 0.0f}};
+    std::memcpy(blasInstance.transform.matrix, matrixData.data(), sizeof(float) * matrixData.size());
+
     blasInstance.instanceCustomIndex = 0;
     blasInstance.mask = 0xFF;
     blasInstance.instanceShaderBindingTableRecordOffset = 0;
@@ -1475,37 +1358,66 @@ void Raytracer::createTLAS()
     endSingleTimeCommands(m_context.getGraphicsQueue(), command);
 }
 
-void Raytracer::allocateCommandBuffers()
+void Raytracer::createShaderBindingTable()
 {
-    m_commandBuffers.resize(m_framebuffers.size());
+    const VkPhysicalDevice physicalDevice = m_context.getPhysicalDevice();
 
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.commandPool = m_context.getGraphicsCommandPool();
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandBufferCount = ui32Size(m_commandBuffers);
+    VkPhysicalDeviceProperties physicalDeviceProperties;
+    vkGetPhysicalDeviceProperties(physicalDevice, &physicalDeviceProperties);
 
-    VK_CHECK(vkAllocateCommandBuffers(m_device, &allocInfo, m_commandBuffers.data()));
-}
+    VkPhysicalDeviceRayTracingPipelinePropertiesKHR physicalDeviceRayTracingPipelineProperties{};
+    physicalDeviceRayTracingPipelineProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR;
+    physicalDeviceRayTracingPipelineProperties.pNext = NULL;
 
-void Raytracer::initializeGUI()
-{
-    const QueueFamilyIndices indices = getQueueFamilies(m_context.getPhysicalDevice(), m_context.getSurface());
+    VkPhysicalDeviceProperties2 physicalDeviceProperties2{};
+    physicalDeviceProperties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    physicalDeviceProperties2.pNext = &physicalDeviceRayTracingPipelineProperties;
+    physicalDeviceProperties2.properties = physicalDeviceProperties;
 
-    GUI::InitData initData{};
-    initData.graphicsCommandPool = m_context.getGraphicsCommandPool();
-    initData.physicalDevice = m_context.getPhysicalDevice();
-    initData.device = m_device;
-    initData.instance = m_context.getInstance();
-    initData.graphicsFamily = indices.graphicsFamily;
-    initData.graphicsQueue = m_context.getGraphicsQueue();
-    initData.colorFormat = c_surfaceFormat.format;
-    initData.depthFormat = c_depthFormat;
-    initData.glfwWindow = m_context.getGlfwWindow();
-    initData.imageCount = c_swapchainImageCount;
-    initData.sampleCount = c_msaaSampleCount;
-    initData.descriptorPool = m_descriptorPool;
-    initData.renderPass = m_renderPass;
+    vkGetPhysicalDeviceProperties2(physicalDevice, &physicalDeviceProperties2);
 
-    m_gui.reset(new GUI(initData));
+    const VkDeviceSize shaderGroupHandleSize = static_cast<VkDeviceSize>(physicalDeviceRayTracingPipelineProperties.shaderGroupHandleSize);
+    const VkDeviceSize shaderBindingTableSize = shaderGroupHandleSize * 4;
+
+    const VkBufferUsageFlags usage = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+    m_shaderBindingTableBuffer = createBuffer(m_device, shaderBindingTableSize, usage);
+    m_shaderBindingTableMemory = allocateAndBindMemory(m_device, physicalDevice, m_shaderBindingTableBuffer, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+
+    std::vector<char> shaderHandleBuffer(shaderBindingTableSize, 0);
+    VK_CHECK(m_pvkGetRayTracingShaderGroupHandlesKHR(m_device, m_pipeline, 0, 4, shaderBindingTableSize, shaderHandleBuffer.data()));
+
+    void* mapped;
+    VK_CHECK(vkMapMemory(m_device, m_shaderBindingTableMemory, 0, shaderBindingTableSize, 0, &mapped));
+
+    for (uint32_t x = 0; x < 4; x++)
+    {
+        memcpy(mapped, &shaderHandleBuffer[x * shaderGroupHandleSize], shaderGroupHandleSize);
+        mapped = (char*)mapped + physicalDeviceRayTracingPipelineProperties.shaderGroupBaseAlignment;
+    }
+
+    vkUnmapMemory(m_device, m_shaderBindingTableMemory);
+
+    VkBufferDeviceAddressInfo shaderBindingTableBufferDeviceAddressInfo{};
+    shaderBindingTableBufferDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+    shaderBindingTableBufferDeviceAddressInfo.pNext = NULL;
+    shaderBindingTableBufferDeviceAddressInfo.buffer = m_shaderBindingTableBuffer;
+
+    const VkDeviceAddress shaderBindingTableBufferDeviceAddress = m_pvkGetBufferDeviceAddressKHR(m_device, &shaderBindingTableBufferDeviceAddressInfo);
+    const VkDeviceSize progSize = physicalDeviceRayTracingPipelineProperties.shaderGroupBaseAlignment;
+    const VkDeviceSize sbtSize = progSize * 4;
+    const VkDeviceSize hitGroupOffset = 0 * progSize;
+    const VkDeviceSize rayGenOffset = 1 * progSize;
+    const VkDeviceSize missOffset = 2 * progSize;
+
+    m_rchitShaderBindingTable.deviceAddress = shaderBindingTableBufferDeviceAddress + 0 * progSize;
+    m_rchitShaderBindingTable.stride = progSize;
+    m_rchitShaderBindingTable.size = sbtSize * 1;
+
+    m_rgenShaderBindingTable.deviceAddress = shaderBindingTableBufferDeviceAddress + 1 * progSize;
+    m_rgenShaderBindingTable.stride = sbtSize;
+    m_rgenShaderBindingTable.size = sbtSize * 1;
+
+    m_rmissShaderBindingTable.deviceAddress = shaderBindingTableBufferDeviceAddress + 2 * progSize;
+    m_rmissShaderBindingTable.stride = progSize;
+    m_rmissShaderBindingTable.size = sbtSize * 2;
 }

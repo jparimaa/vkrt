@@ -3,7 +3,6 @@
 #include "Context.hpp"
 #include "Camera.hpp"
 #include "Model.hpp"
-#include "GUI.hpp"
 #include <vector>
 #include <chrono>
 #include <unordered_map>
@@ -34,11 +33,9 @@ private:
     void releaseModel();
     void setupCamera();
     void updateCamera(double deltaTime);
-    void createRenderPass();
     void createMsaaColorImage();
     void createDepthImage();
     void createSwapchainImageViews();
-    void createFramebuffers();
     void createSampler();
     void createTextures();
     void createMipmaps(VkImage image, uint32_t mipLevels, glm::uvec2 imageSize);
@@ -48,6 +45,7 @@ private:
     void createPipeline();
     void createDescriptorPool();
     void allocateCommonDescriptorSets();
+    void allocateMaterialIndexDescriptorSets();
     void allocateTextureDescriptorSets();
     void createCommonUniformBuffer();
     void updateCommonDescriptorSets();
@@ -57,7 +55,7 @@ private:
     void allocateCommandBuffers();
     void createBLAS();
     void createTLAS();
-    void initializeGUI();
+    void createShaderBindingTable();
 
     Context& m_context;
     VkDevice m_device;
@@ -68,12 +66,13 @@ private:
     PFN_vkCreateAccelerationStructureKHR m_pvkCreateAccelerationStructureKHR;
     PFN_vkGetAccelerationStructureDeviceAddressKHR m_pvkGetAccelerationStructureDeviceAddressKHR;
     PFN_vkCmdBuildAccelerationStructuresKHR m_pvkCmdBuildAccelerationStructuresKHR;
+    PFN_vkGetRayTracingShaderGroupHandlesKHR m_pvkGetRayTracingShaderGroupHandlesKHR;
+    PFN_vkCmdTraceRaysKHR m_pvkCmdTraceRaysKHR;
 
     std::unique_ptr<Model> m_model{nullptr};
     Camera m_camera;
     std::chrono::steady_clock::time_point m_lastRenderTime;
     std::unordered_map<int, bool> m_keysDown;
-    VkRenderPass m_renderPass;
     VkImage m_msaaColorImage;
     VkDeviceMemory m_msaaColorImageMemory;
     VkImageView m_msaaColorImageView;
@@ -81,7 +80,6 @@ private:
     VkDeviceMemory m_depthImageMemory;
     VkImageView m_depthImageView;
     std::vector<VkImageView> m_swapchainImageViews;
-    std::vector<VkFramebuffer> m_framebuffers;
     VkSampler m_sampler;
     std::vector<VkImage> m_images;
     VkDeviceMemory m_imageMemory;
@@ -116,8 +114,13 @@ private:
     VkAccelerationStructureKHR m_tlas;
     VkBuffer m_tlasScratchBuffer;
     VkDeviceMemory m_tlasScratchMemory;
+    VkBuffer m_shaderBindingTableBuffer;
+    VkDeviceMemory m_shaderBindingTableMemory;
+    VkStridedDeviceAddressRegionKHR m_rchitShaderBindingTable{};
+    VkStridedDeviceAddressRegionKHR m_rgenShaderBindingTable{};
+    VkStridedDeviceAddressRegionKHR m_rmissShaderBindingTable{};
+    VkStridedDeviceAddressRegionKHR m_callableShaderBindingTable{};
 
     std::vector<VkCommandBuffer> m_commandBuffers;
-    std::unique_ptr<GUI> m_gui;
     float m_fps;
 };
