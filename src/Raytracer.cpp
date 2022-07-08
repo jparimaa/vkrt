@@ -14,8 +14,12 @@ namespace
 {
 struct UniformBufferInfo
 {
-    glm::mat4 wvp;
-    glm::mat4 camera;
+    glm::vec4 position;
+    glm::vec4 right;
+    glm::vec4 up;
+    glm::vec4 forward;
+
+    uint64_t frameCount;
 };
 
 const size_t c_uniformBufferSize = sizeof(UniformBufferInfo);
@@ -48,8 +52,8 @@ Raytracer::Raytracer(Context& context) :
     createTexturesDescriptorSetLayout();
     createPipeline();
     allocateCommonDescriptorSets();
-    allocateMaterialIndexDescriptorSets();
-    allocateTextureDescriptorSets();
+    //allocateMaterialIndexDescriptorSets();
+    //allocateTextureDescriptorSets();
     createCommonUniformBuffer();
     updateCommonDescriptorSets();
     //updateMaterialDescriptorSet();
@@ -57,6 +61,7 @@ Raytracer::Raytracer(Context& context) :
     createVertexAndIndexBuffer();
     allocateCommandBuffers();
     createBLAS();
+    createShaderBindingTable();
     releaseModel();
 }
 
@@ -124,7 +129,7 @@ bool Raytracer::render()
         DebugMarker::beginLabel(cb, "Render", DebugMarker::blue);
         vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_pipeline);
 
-        const std::vector<VkDescriptorSet> descriptorSets{m_commonDescriptorSets[0] /*, m_texturesDescriptorSets[primitiveInfo.material]*/};
+        const std::vector<VkDescriptorSet> descriptorSets{m_commonDescriptorSet /*, m_texturesDescriptorSets[primitiveInfo.material]*/};
         vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0, ui32Size(descriptorSets), descriptorSets.data(), 0, nullptr);
 
         m_pvkCmdTraceRaysKHR(cb, &m_rgenShaderBindingTable, &m_rmissShaderBindingTable, &m_rchitShaderBindingTable, &m_callableShaderBindingTable, c_windowWidth, c_windowHeight, 1);
@@ -155,9 +160,14 @@ bool Raytracer::update(uint32_t imageIndex)
 
     void* dst;
     VK_CHECK(vkMapMemory(m_device, m_commonUniformBufferMemory, imageIndex * c_uniformBufferSize, c_uniformBufferSize, 0, &dst));
+
     UniformBufferInfo uniformBufferInfo{};
-    const glm::mat4 scaleMatrix = glm::scale(glm::vec3(0.01f, 0.01f, 0.01f));
-    uniformBufferInfo.wvp = m_camera.getProjectionMatrix() * m_camera.getViewMatrix() * scaleMatrix;
+    uniformBufferInfo.forward = toVec4(m_camera.getForward(), 0.0f);
+    uniformBufferInfo.right = toVec4(-m_camera.getLeft(), 0.0f);
+    uniformBufferInfo.up = toVec4(m_camera.getUp(), 0.0f);
+    uniformBufferInfo.position = toVec4(m_camera.getPosition(), 1.0f);
+    uniformBufferInfo.frameCount = 0;
+
     std::memcpy(dst, &uniformBufferInfo, static_cast<size_t>(c_uniformBufferSize));
     vkUnmapMemory(m_device, m_commonUniformBufferMemory);
 
@@ -660,7 +670,7 @@ void Raytracer::createTexturesDescriptorSetLayout()
 
 void Raytracer::createPipeline()
 {
-    const std::vector<VkDescriptorSetLayout> descriptorSetLayouts{m_commonDescriptorSetLayout, m_materialDescriptorSetLayout, m_texturesDescriptorSetLayout};
+    const std::vector<VkDescriptorSetLayout> descriptorSetLayouts{m_commonDescriptorSetLayout /*, m_materialDescriptorSetLayout, m_texturesDescriptorSetLayout*/};
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = ui32Size(descriptorSetLayouts);
@@ -797,10 +807,7 @@ void Raytracer::createDescriptorPool()
 
 void Raytracer::allocateCommonDescriptorSets()
 {
-    std::vector<VkDescriptorSetLayout> descriptorSetLayouts{
-        m_commonDescriptorSetLayout, //
-        m_materialDescriptorSetLayout //
-    };
+    std::vector<VkDescriptorSetLayout> descriptorSetLayouts{m_commonDescriptorSetLayout};
 
     VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
     descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -809,13 +816,8 @@ void Raytracer::allocateCommonDescriptorSets()
     descriptorSetAllocateInfo.descriptorSetCount = ui32Size(descriptorSetLayouts);
     descriptorSetAllocateInfo.pSetLayouts = descriptorSetLayouts.data();
 
-    m_commonDescriptorSets.resize(ui32Size(descriptorSetLayouts));
-
-    VK_CHECK(vkAllocateDescriptorSets(m_device, &descriptorSetAllocateInfo, m_commonDescriptorSets.data()));
-    for (size_t i = 0; i < m_commonDescriptorSets.size(); ++i)
-    {
-        DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET, m_commonDescriptorSets[i], "Desc set - Common " + std::to_string(i));
-    }
+    VK_CHECK(vkAllocateDescriptorSets(m_device, &descriptorSetAllocateInfo, &m_commonDescriptorSet));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET, m_commonDescriptorSet, "Desc set - Common");
 }
 
 void Raytracer::allocateMaterialIndexDescriptorSets()
@@ -907,7 +909,7 @@ void Raytracer::updateCommonDescriptorSets()
     VkWriteDescriptorSet writeAccelerationStructure{};
     writeAccelerationStructure.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writeAccelerationStructure.pNext = &accelerationStructureDescriptorInfo;
-    writeAccelerationStructure.dstSet = m_commonDescriptorSets[0];
+    writeAccelerationStructure.dstSet = m_commonDescriptorSet;
     writeAccelerationStructure.dstBinding = 0;
     writeAccelerationStructure.dstArrayElement = 0;
     writeAccelerationStructure.descriptorCount = 1;
@@ -919,7 +921,7 @@ void Raytracer::updateCommonDescriptorSets()
     VkWriteDescriptorSet writeUniformBuffer{};
     writeUniformBuffer.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writeUniformBuffer.pNext = NULL;
-    writeUniformBuffer.dstSet = m_commonDescriptorSets[0];
+    writeUniformBuffer.dstSet = m_commonDescriptorSet;
     writeUniformBuffer.dstBinding = 1;
     writeUniformBuffer.dstArrayElement = 0;
     writeUniformBuffer.descriptorCount = 1;
@@ -931,7 +933,7 @@ void Raytracer::updateCommonDescriptorSets()
     VkWriteDescriptorSet writeIndexBuffer{};
     writeIndexBuffer.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writeIndexBuffer.pNext = NULL;
-    writeIndexBuffer.dstSet = m_commonDescriptorSets[0];
+    writeIndexBuffer.dstSet = m_commonDescriptorSet;
     writeIndexBuffer.dstBinding = 2;
     writeIndexBuffer.dstArrayElement = 0;
     writeIndexBuffer.descriptorCount = 1;
@@ -943,7 +945,7 @@ void Raytracer::updateCommonDescriptorSets()
     VkWriteDescriptorSet writeVertexBuffer{};
     writeVertexBuffer.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writeVertexBuffer.pNext = NULL;
-    writeVertexBuffer.dstSet = m_commonDescriptorSets[0];
+    writeVertexBuffer.dstSet = m_commonDescriptorSet;
     writeVertexBuffer.dstBinding = 3;
     writeVertexBuffer.dstArrayElement = 0;
     writeVertexBuffer.descriptorCount = 1;
@@ -955,7 +957,7 @@ void Raytracer::updateCommonDescriptorSets()
     VkWriteDescriptorSet writeImage{};
     writeImage.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     writeImage.pNext = NULL;
-    writeImage.dstSet = m_commonDescriptorSets[0];
+    writeImage.dstSet = m_commonDescriptorSet;
     writeImage.dstBinding = 4;
     writeImage.dstArrayElement = 0;
     writeImage.descriptorCount = 1;

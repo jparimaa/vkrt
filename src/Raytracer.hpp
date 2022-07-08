@@ -90,7 +90,7 @@ private:
     VkPipelineLayout m_pipelineLayout;
     VkPipeline m_pipeline;
     VkDescriptorPool m_descriptorPool;
-    std::vector<VkDescriptorSet> m_commonDescriptorSets;
+    VkDescriptorSet m_commonDescriptorSet;
     std::vector<VkDescriptorSet> m_texturesDescriptorSets;
     VkBuffer m_commonUniformBuffer;
     VkDeviceMemory m_commonUniformBufferMemory;

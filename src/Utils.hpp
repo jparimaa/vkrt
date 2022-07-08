@@ -42,6 +42,8 @@ const glm::vec3 c_left(-1.0f, 0.0f, 0.0f);
 const glm::vec4 c_leftZero(c_left.x, c_left.y, c_left.z, 0.0f);
 const glm::vec3 c_right(1.0f, 0.0f, 0.0f);
 
+glm::vec4 toVec4(glm::vec3 v, float w);
+
 template<typename T>
 uint32_t ui32Size(const T& container)
 {

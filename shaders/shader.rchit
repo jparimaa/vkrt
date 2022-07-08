@@ -44,11 +44,12 @@ indexBuffer;
 layout(binding = 3, set = 0) buffer VertexBuffer { float data[]; }
 vertexBuffer;
 
+/*
 layout(binding = 0, set = 1) buffer MaterialIndexBuffer { uint data[]; }
 materialIndexBuffer;
 layout(binding = 1, set = 1) buffer MaterialBuffer { Material data[]; }
 materialBuffer;
-
+*/
 float random(vec2 uv, float seed) {
   return fract(sin(mod(dot(uv, vec2(12.9898, 78.233)) + 1113.1 * seed, M_PI)) *
                43758.5453);
@@ -96,21 +97,18 @@ void main() {
                   vertexC * barycentric.z;
   vec3 geometricNormal = normalize(cross(vertexB - vertexA, vertexC - vertexA));
 
-  vec3 surfaceColor =
-      materialBuffer.data[materialIndexBuffer.data[gl_PrimitiveID]].diffuse;
+  vec3 surfaceColor = vec3(0.3, 0.5, 0.7)* (gl_PrimitiveID / 100.0);
+      //materialBuffer.data[materialIndexBuffer.data[gl_PrimitiveID]].diffuse;
 
   // 40 & 41 == light
   if (gl_PrimitiveID == 40 || gl_PrimitiveID == 41) {
     if (payload.rayDepth == 0) {
-      payload.directColor =
-          materialBuffer.data[materialIndexBuffer.data[gl_PrimitiveID]]
-              .emission;
+      payload.directColor = vec3(0.6, 0.3, 0.1) * (gl_PrimitiveID / 100.0);
+          //materialBuffer.data[materialIndexBuffer.data[gl_PrimitiveID]].emission;
     } else {
-      payload.indirectColor +=
-          (1.0 / payload.rayDepth) *
-          materialBuffer.data[materialIndexBuffer.data[gl_PrimitiveID]]
-              .emission *
-          dot(payload.previousNormal, payload.rayDirection);
+      payload.indirectColor += vec3(0.1, 0.3, 0.2) * (gl_PrimitiveID / 100.0);
+          //(1.0 / payload.rayDepth) *
+          //materialBuffer.data[materialIndexBuffer.data[gl_PrimitiveID]].emission *dot(payload.previousNormal, payload.rayDirection);
     }
   } else {
     int randomIndex =

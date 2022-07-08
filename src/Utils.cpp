@@ -5,6 +5,11 @@
 #include <unistd.h>
 #endif
 
+glm::vec4 toVec4(glm::vec3 v, float w)
+{
+    return glm::vec4(v.x, v.y, v.x, w);
+}
+
 std::filesystem::path getCurrentExecutableDirectory()
 {
     char path[260] = {0};

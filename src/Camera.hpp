@@ -8,6 +8,7 @@ class Camera final
 public:
     Camera();
 
+    glm::vec3 getPosition() const;
     glm::vec3 getForward() const;
     glm::vec3 getLeft() const;
     glm::vec3 getUp() const;
