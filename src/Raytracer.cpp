@@ -51,8 +51,8 @@ Raytracer::Raytracer(Context& context) :
     createPipeline();
     allocateCommonDescriptorSets();
     allocateTextureDescriptorSets();
-    createUniformBuffer();
-    //updateCommonDescriptorSets();
+    createCommonUniformBuffer();
+    updateCommonDescriptorSets();
     updateMaterialDescriptorSet();
     updateTexturesDescriptorSets();
     createVertexAndIndexBuffer();
@@ -979,7 +979,7 @@ void Raytracer::allocateTextureDescriptorSets()
     }
 }
 
-void Raytracer::createUniformBuffer()
+void Raytracer::createCommonUniformBuffer()
 {
     const VkMemoryPropertyFlags memoryProperties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
     const uint64_t bufferSize = c_uniformBufferSize * m_context.getSwapchainImages().size();
@@ -1012,25 +1012,103 @@ void Raytracer::createUniformBuffer()
 
 void Raytracer::updateCommonDescriptorSets()
 {
-    VkDescriptorBufferInfo bufferInfo{};
-    bufferInfo.buffer = m_commonUniformBuffer;
-    bufferInfo.range = c_uniformBufferSize;
+    // Infos
+    VkWriteDescriptorSetAccelerationStructureKHR accelerationStructureDescriptorInfo{};
+    accelerationStructureDescriptorInfo.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
+    accelerationStructureDescriptorInfo.pNext = NULL;
+    accelerationStructureDescriptorInfo.accelerationStructureCount = 1;
+    accelerationStructureDescriptorInfo.pAccelerationStructures = &m_tlas;
 
-    std::vector<VkWriteDescriptorSet> descriptorWrites(m_commonDescriptorSets.size());
+    VkDescriptorBufferInfo uniformDescriptorInfo{};
+    uniformDescriptorInfo.buffer = m_commonUniformBuffer;
+    uniformDescriptorInfo.offset = 0;
+    uniformDescriptorInfo.range = VK_WHOLE_SIZE;
 
-    for (size_t i = 0; i < m_commonDescriptorSets.size(); ++i)
-    {
-        bufferInfo.offset = i * c_uniformBufferSize;
-        descriptorWrites[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        descriptorWrites[i].dstSet = m_commonDescriptorSets[i];
-        descriptorWrites[i].dstBinding = 0;
-        descriptorWrites[i].dstArrayElement = 0;
-        descriptorWrites[i].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        descriptorWrites[i].descriptorCount = 1;
-        descriptorWrites[i].pBufferInfo = &bufferInfo;
-    }
+    VkDescriptorBufferInfo indexDescriptorInfo{};
+    indexDescriptorInfo.buffer = m_attributeBuffer;
+    indexDescriptorInfo.offset = m_primitiveInfos[0].indexOffset;
+    indexDescriptorInfo.range = m_indexDataSize;
 
-    vkUpdateDescriptorSets(m_device, ui32Size(descriptorWrites), descriptorWrites.data(), 0, nullptr);
+    VkDescriptorBufferInfo vertexDescriptorInfo{};
+    vertexDescriptorInfo.buffer = m_attributeBuffer;
+    vertexDescriptorInfo.offset = 0;
+    vertexDescriptorInfo.range = m_vertexDataSize;
+
+    VkDescriptorImageInfo imageDescriptorInfo{};
+    imageDescriptorInfo.sampler = VK_NULL_HANDLE;
+    imageDescriptorInfo.imageView = m_msaaColorImageView;
+    imageDescriptorInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    // Write sets
+    VkWriteDescriptorSet writeAccelerationStructure{};
+    writeAccelerationStructure.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeAccelerationStructure.pNext = &accelerationStructureDescriptorInfo;
+    writeAccelerationStructure.dstSet = m_commonDescriptorSets[0];
+    writeAccelerationStructure.dstBinding = 0;
+    writeAccelerationStructure.dstArrayElement = 0;
+    writeAccelerationStructure.descriptorCount = 1;
+    writeAccelerationStructure.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    writeAccelerationStructure.pImageInfo = NULL;
+    writeAccelerationStructure.pBufferInfo = NULL;
+    writeAccelerationStructure.pTexelBufferView = NULL;
+
+    VkWriteDescriptorSet writeUniformBuffer{};
+    writeUniformBuffer.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeUniformBuffer.pNext = NULL;
+    writeUniformBuffer.dstSet = m_commonDescriptorSets[0];
+    writeUniformBuffer.dstBinding = 1;
+    writeUniformBuffer.dstArrayElement = 0;
+    writeUniformBuffer.descriptorCount = 1;
+    writeUniformBuffer.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    writeUniformBuffer.pImageInfo = NULL;
+    writeUniformBuffer.pBufferInfo = &uniformDescriptorInfo;
+    writeUniformBuffer.pTexelBufferView = NULL;
+
+    VkWriteDescriptorSet writeIndexBuffer{};
+    writeIndexBuffer.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeIndexBuffer.pNext = NULL;
+    writeIndexBuffer.dstSet = m_commonDescriptorSets[0];
+    writeIndexBuffer.dstBinding = 2;
+    writeIndexBuffer.dstArrayElement = 0;
+    writeIndexBuffer.descriptorCount = 1;
+    writeIndexBuffer.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writeIndexBuffer.pImageInfo = NULL;
+    writeIndexBuffer.pBufferInfo = &indexDescriptorInfo;
+    writeIndexBuffer.pTexelBufferView = NULL;
+
+    VkWriteDescriptorSet writeVertexBuffer{};
+    writeVertexBuffer.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeVertexBuffer.pNext = NULL;
+    writeVertexBuffer.dstSet = m_commonDescriptorSets[0];
+    writeVertexBuffer.dstBinding = 3;
+    writeVertexBuffer.dstArrayElement = 0;
+    writeVertexBuffer.descriptorCount = 1;
+    writeVertexBuffer.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writeVertexBuffer.pImageInfo = NULL;
+    writeVertexBuffer.pBufferInfo = &vertexDescriptorInfo;
+    writeVertexBuffer.pTexelBufferView = NULL;
+
+    VkWriteDescriptorSet writeImage{};
+    writeImage.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeImage.pNext = NULL;
+    writeImage.dstSet = m_commonDescriptorSets[0];
+    writeImage.dstBinding = 4;
+    writeImage.dstArrayElement = 0;
+    writeImage.descriptorCount = 1;
+    writeImage.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    writeImage.pImageInfo = &imageDescriptorInfo;
+    writeImage.pBufferInfo = NULL;
+    writeImage.pTexelBufferView = NULL;
+
+    std::vector<VkWriteDescriptorSet> writeDescriptorSets{
+        writeAccelerationStructure, //
+        writeUniformBuffer, //
+        writeIndexBuffer, //
+        writeVertexBuffer, //
+        writeImage //
+    };
+
+    vkUpdateDescriptorSets(m_device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
 }
 
 void Raytracer::updateMaterialDescriptorSet()
@@ -1102,6 +1180,9 @@ void Raytracer::createVertexAndIndexBuffer()
         vertexOffset += vertexDataSize;
         indexOffset += indexDataSize;
     }
+
+    m_vertexDataSize = vertexOffset;
+    m_indexDataSize = indexOffset;
 
     VkPhysicalDevice physicalDevice = m_context.getPhysicalDevice();
     StagingBuffer stagingBuffer = createStagingBuffer(m_device, physicalDevice, data.data(), bufferSize);

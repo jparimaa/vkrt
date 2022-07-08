@@ -49,7 +49,7 @@ private:
     void createDescriptorPool();
     void allocateCommonDescriptorSets();
     void allocateTextureDescriptorSets();
-    void createUniformBuffer();
+    void createCommonUniformBuffer();
     void updateCommonDescriptorSets();
     void updateMaterialDescriptorSet();
     void updateTexturesDescriptorSets();
@@ -99,6 +99,8 @@ private:
     VkBuffer m_attributeBuffer;
     VkDeviceMemory m_attributeBufferMemory;
     std::vector<PrimitiveInfo> m_primitiveInfos;
+    size_t m_vertexDataSize;
+    size_t m_indexDataSize;
 
     VkBuffer m_blasBuffer;
     VkDeviceMemory m_blasMemory;
