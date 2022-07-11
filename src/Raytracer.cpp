@@ -24,7 +24,6 @@ struct UniformBufferInfo
 
 const size_t c_uniformBufferSize = sizeof(UniformBufferInfo);
 const VkImageSubresourceRange c_defaultSubresourceRance{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-const VkSampleCountFlagBits c_msaaSampleCount = VK_SAMPLE_COUNT_8_BIT;
 
 VkMemoryAllocateFlagsInfo c_memoryAllocateFlagsInfo{
     VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO, //
@@ -42,8 +41,7 @@ Raytracer::Raytracer(Context& context) :
     getFunctionPointers();
     loadModel();
     setupCamera();
-    createMsaaColorImage();
-    createDepthImage();
+    createColorImage();
     createSwapchainImageViews();
     createSampler();
     createTextures();
@@ -51,16 +49,18 @@ Raytracer::Raytracer(Context& context) :
     createMaterialDescriptorSetLayout();
     createTexturesDescriptorSetLayout();
     createPipeline();
+    createDescriptorPool();
     allocateCommonDescriptorSets();
     //allocateMaterialIndexDescriptorSets();
     //allocateTextureDescriptorSets();
     createCommonUniformBuffer();
-    updateCommonDescriptorSets();
-    //updateMaterialDescriptorSet();
-    //updateTexturesDescriptorSets();
     createVertexAndIndexBuffer();
     allocateCommandBuffers();
     createBLAS();
+    createTLAS();
+    updateCommonDescriptorSets();
+    //updateMaterialDescriptorSet();
+    //updateTexturesDescriptorSets();
     createShaderBindingTable();
     releaseModel();
 }
@@ -98,13 +98,9 @@ Raytracer::~Raytracer()
         vkDestroyImageView(m_device, imageView, nullptr);
     }
 
-    vkDestroyImageView(m_device, m_depthImageView, nullptr);
-    vkFreeMemory(m_device, m_depthImageMemory, nullptr);
-    vkDestroyImage(m_device, m_depthImage, nullptr);
-
-    vkDestroyImageView(m_device, m_msaaColorImageView, nullptr);
-    vkFreeMemory(m_device, m_msaaColorImageMemory, nullptr);
-    vkDestroyImage(m_device, m_msaaColorImage, nullptr);
+    vkDestroyImageView(m_device, m_colorImageView, nullptr);
+    vkFreeMemory(m_device, m_colorImageMemory, nullptr);
+    vkDestroyImage(m_device, m_colorImage, nullptr);
 }
 
 bool Raytracer::render()
@@ -130,7 +126,7 @@ bool Raytracer::render()
         vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_pipeline);
 
         const std::vector<VkDescriptorSet> descriptorSets{m_commonDescriptorSet /*, m_texturesDescriptorSets[primitiveInfo.material]*/};
-        vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0, ui32Size(descriptorSets), descriptorSets.data(), 0, nullptr);
+        vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_pipelineLayout, 0, ui32Size(descriptorSets), descriptorSets.data(), 0, nullptr);
 
         m_pvkCmdTraceRaysKHR(cb, &m_rgenShaderBindingTable, &m_rmissShaderBindingTable, &m_rchitShaderBindingTable, &m_callableShaderBindingTable, c_windowWidth, c_windowHeight, 1);
         DebugMarker::endLabel(cb);
@@ -263,7 +259,7 @@ void Raytracer::updateCamera(double deltaTime)
     }
 }
 
-void Raytracer::createMsaaColorImage()
+void Raytracer::createColorImage()
 {
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -276,16 +272,16 @@ void Raytracer::createMsaaColorImage()
     imageInfo.format = c_surfaceFormat.format;
     imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
     imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    imageInfo.samples = c_msaaSampleCount;
+    imageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
     imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     imageInfo.flags = 0;
 
-    VK_CHECK(vkCreateImage(m_device, &imageInfo, nullptr, &m_msaaColorImage));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_IMAGE, m_msaaColorImage, "Image - MSAA color");
+    VK_CHECK(vkCreateImage(m_device, &imageInfo, nullptr, &m_colorImage));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_IMAGE, m_colorImage, "Image - MSAA color");
 
     VkMemoryRequirements memRequirements;
-    vkGetImageMemoryRequirements(m_device, m_msaaColorImage, &memRequirements);
+    vkGetImageMemoryRequirements(m_device, m_colorImage, &memRequirements);
 
     const MemoryTypeResult memoryTypeResult = findMemoryType(m_context.getPhysicalDevice(), memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     CHECK(memoryTypeResult.found);
@@ -295,68 +291,20 @@ void Raytracer::createMsaaColorImage()
     allocInfo.allocationSize = memRequirements.size;
     allocInfo.memoryTypeIndex = memoryTypeResult.typeIndex;
 
-    VK_CHECK(vkAllocateMemory(m_device, &allocInfo, nullptr, &m_msaaColorImageMemory));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_msaaColorImageMemory, "Memory - MSAA color image");
-    VK_CHECK(vkBindImageMemory(m_device, m_msaaColorImage, m_msaaColorImageMemory, 0));
+    VK_CHECK(vkAllocateMemory(m_device, &allocInfo, nullptr, &m_colorImageMemory));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_colorImageMemory, "Memory - MSAA color image");
+    VK_CHECK(vkBindImageMemory(m_device, m_colorImage, m_colorImageMemory, 0));
 
     VkImageViewCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    createInfo.image = m_msaaColorImage;
+    createInfo.image = m_colorImage;
     createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
     createInfo.format = c_surfaceFormat.format;
     createInfo.subresourceRange = c_defaultSubresourceRance;
     createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 
-    VK_CHECK(vkCreateImageView(m_device, &createInfo, nullptr, &m_msaaColorImageView));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_IMAGE_VIEW, m_msaaColorImageView, "Image view - MSAA color");
-}
-
-void Raytracer::createDepthImage()
-{
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.extent.width = c_windowWidth;
-    imageInfo.extent.height = c_windowHeight;
-    imageInfo.extent.depth = 1;
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.format = c_depthFormat;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
-    imageInfo.samples = c_msaaSampleCount;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    imageInfo.flags = 0;
-
-    VK_CHECK(vkCreateImage(m_device, &imageInfo, nullptr, &m_depthImage));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_IMAGE, m_msaaColorImage, "Image - MSAA depth");
-
-    VkMemoryRequirements memRequirements;
-    vkGetImageMemoryRequirements(m_device, m_depthImage, &memRequirements);
-
-    const MemoryTypeResult memoryTypeResult = findMemoryType(m_context.getPhysicalDevice(), memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    CHECK(memoryTypeResult.found);
-
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = memRequirements.size;
-    allocInfo.memoryTypeIndex = memoryTypeResult.typeIndex;
-
-    VK_CHECK(vkAllocateMemory(m_device, &allocInfo, nullptr, &m_depthImageMemory));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_msaaColorImageMemory, "Memory - MSAA depth image");
-    VK_CHECK(vkBindImageMemory(m_device, m_depthImage, m_depthImageMemory, 0));
-
-    VkImageViewCreateInfo createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    createInfo.image = m_depthImage;
-    createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    createInfo.format = c_depthFormat;
-    createInfo.subresourceRange = c_defaultSubresourceRance;
-    createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-
-    VK_CHECK(vkCreateImageView(m_device, &createInfo, nullptr, &m_depthImageView));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_IMAGE_VIEW, m_depthImageView, "Image view - MSAA depth");
+    VK_CHECK(vkCreateImageView(m_device, &createInfo, nullptr, &m_colorImageView));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_IMAGE_VIEW, m_colorImageView, "Image view - MSAA color");
 }
 
 void Raytracer::createSwapchainImageViews()
@@ -454,7 +402,7 @@ void Raytracer::createTextures()
     const VkDeviceSize singleImageSize = memRequirements.size;
 
     VK_CHECK(vkAllocateMemory(m_device, &allocInfo, nullptr, &m_imageMemory));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_msaaColorImageMemory, "Memory - Texture images");
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_colorImageMemory, "Memory - Texture images");
 
     for (size_t i = 0; i < imageCount; ++i)
     {
@@ -627,7 +575,7 @@ void Raytracer::createCommonDescriptorSetLayout()
 
 void Raytracer::createMaterialDescriptorSetLayout()
 {
-    std::vector<VkDescriptorSetLayoutBinding> bindings(2);
+    std::vector<VkDescriptorSetLayoutBinding> bindings(1);
     bindings[0].binding = 0;
     bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
     bindings[0].descriptorCount = 1;
@@ -876,147 +824,6 @@ void Raytracer::createCommonUniformBuffer()
     VK_CHECK(vkBindBufferMemory(m_device, m_commonUniformBuffer, m_commonUniformBufferMemory, 0));
 }
 
-void Raytracer::updateCommonDescriptorSets()
-{
-    // Infos
-    VkWriteDescriptorSetAccelerationStructureKHR accelerationStructureDescriptorInfo{};
-    accelerationStructureDescriptorInfo.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
-    accelerationStructureDescriptorInfo.pNext = NULL;
-    accelerationStructureDescriptorInfo.accelerationStructureCount = 1;
-    accelerationStructureDescriptorInfo.pAccelerationStructures = &m_tlas;
-
-    VkDescriptorBufferInfo uniformDescriptorInfo{};
-    uniformDescriptorInfo.buffer = m_commonUniformBuffer;
-    uniformDescriptorInfo.offset = 0;
-    uniformDescriptorInfo.range = VK_WHOLE_SIZE;
-
-    VkDescriptorBufferInfo indexDescriptorInfo{};
-    indexDescriptorInfo.buffer = m_attributeBuffer;
-    indexDescriptorInfo.offset = m_primitiveInfos[0].indexOffset;
-    indexDescriptorInfo.range = m_indexDataSize;
-
-    VkDescriptorBufferInfo vertexDescriptorInfo{};
-    vertexDescriptorInfo.buffer = m_attributeBuffer;
-    vertexDescriptorInfo.offset = 0;
-    vertexDescriptorInfo.range = m_vertexDataSize;
-
-    VkDescriptorImageInfo imageDescriptorInfo{};
-    imageDescriptorInfo.sampler = VK_NULL_HANDLE;
-    imageDescriptorInfo.imageView = m_msaaColorImageView;
-    imageDescriptorInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-
-    // Write sets
-    VkWriteDescriptorSet writeAccelerationStructure{};
-    writeAccelerationStructure.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writeAccelerationStructure.pNext = &accelerationStructureDescriptorInfo;
-    writeAccelerationStructure.dstSet = m_commonDescriptorSet;
-    writeAccelerationStructure.dstBinding = 0;
-    writeAccelerationStructure.dstArrayElement = 0;
-    writeAccelerationStructure.descriptorCount = 1;
-    writeAccelerationStructure.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
-    writeAccelerationStructure.pImageInfo = NULL;
-    writeAccelerationStructure.pBufferInfo = NULL;
-    writeAccelerationStructure.pTexelBufferView = NULL;
-
-    VkWriteDescriptorSet writeUniformBuffer{};
-    writeUniformBuffer.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writeUniformBuffer.pNext = NULL;
-    writeUniformBuffer.dstSet = m_commonDescriptorSet;
-    writeUniformBuffer.dstBinding = 1;
-    writeUniformBuffer.dstArrayElement = 0;
-    writeUniformBuffer.descriptorCount = 1;
-    writeUniformBuffer.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    writeUniformBuffer.pImageInfo = NULL;
-    writeUniformBuffer.pBufferInfo = &uniformDescriptorInfo;
-    writeUniformBuffer.pTexelBufferView = NULL;
-
-    VkWriteDescriptorSet writeIndexBuffer{};
-    writeIndexBuffer.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writeIndexBuffer.pNext = NULL;
-    writeIndexBuffer.dstSet = m_commonDescriptorSet;
-    writeIndexBuffer.dstBinding = 2;
-    writeIndexBuffer.dstArrayElement = 0;
-    writeIndexBuffer.descriptorCount = 1;
-    writeIndexBuffer.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    writeIndexBuffer.pImageInfo = NULL;
-    writeIndexBuffer.pBufferInfo = &indexDescriptorInfo;
-    writeIndexBuffer.pTexelBufferView = NULL;
-
-    VkWriteDescriptorSet writeVertexBuffer{};
-    writeVertexBuffer.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writeVertexBuffer.pNext = NULL;
-    writeVertexBuffer.dstSet = m_commonDescriptorSet;
-    writeVertexBuffer.dstBinding = 3;
-    writeVertexBuffer.dstArrayElement = 0;
-    writeVertexBuffer.descriptorCount = 1;
-    writeVertexBuffer.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-    writeVertexBuffer.pImageInfo = NULL;
-    writeVertexBuffer.pBufferInfo = &vertexDescriptorInfo;
-    writeVertexBuffer.pTexelBufferView = NULL;
-
-    VkWriteDescriptorSet writeImage{};
-    writeImage.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    writeImage.pNext = NULL;
-    writeImage.dstSet = m_commonDescriptorSet;
-    writeImage.dstBinding = 4;
-    writeImage.dstArrayElement = 0;
-    writeImage.descriptorCount = 1;
-    writeImage.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    writeImage.pImageInfo = &imageDescriptorInfo;
-    writeImage.pBufferInfo = NULL;
-    writeImage.pTexelBufferView = NULL;
-
-    std::vector<VkWriteDescriptorSet> writeDescriptorSets{
-        writeAccelerationStructure, //
-        writeUniformBuffer, //
-        writeIndexBuffer, //
-        writeVertexBuffer, //
-        writeImage //
-    };
-
-    vkUpdateDescriptorSets(m_device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
-}
-
-void Raytracer::updateMaterialDescriptorSet()
-{
-}
-
-void Raytracer::updateTexturesDescriptorSets()
-{
-    const std::vector<Model::Material>& materials = m_model->materials;
-    const size_t materialCount = m_model->materials.size();
-    std::vector<VkWriteDescriptorSet> descriptorWrites(materialCount * 3);
-
-    const size_t imageCount = m_model->images.size();
-    std::vector<VkDescriptorImageInfo> imageInfos(imageCount);
-    for (size_t i = 0; i < imageCount; ++i)
-    {
-        VkDescriptorImageInfo& imageInfo = imageInfos[i];
-        imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        imageInfo.imageView = m_imageViews[i];
-        imageInfo.sampler = m_sampler;
-    }
-
-    for (size_t i = 0; i < materialCount; ++i)
-    {
-        const size_t offset = i * 3;
-        const std::vector<int> materialIndices{materials[i].baseColor, materials[i].metallicRoughnessImage, materials[i].normalImage};
-        for (size_t j = 0; j < materialIndices.size(); ++j)
-        {
-            descriptorWrites[offset + j].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptorWrites[offset + j].dstSet = m_texturesDescriptorSets[i];
-            descriptorWrites[offset + j].dstBinding = j;
-            descriptorWrites[offset + j].dstArrayElement = 0;
-            descriptorWrites[offset + j].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            descriptorWrites[offset + j].descriptorCount = 1;
-            const int materialIndex = materialIndices[j] != -1 ? materialIndices[j] : 0;
-            descriptorWrites[offset + j].pImageInfo = &imageInfos[materialIndex];
-        }
-    }
-
-    vkUpdateDescriptorSets(m_device, ui32Size(descriptorWrites), descriptorWrites.data(), 0, nullptr);
-}
-
 void Raytracer::createVertexAndIndexBuffer()
 {
     m_primitiveInfos.resize(m_model->primitives.size());
@@ -1024,6 +831,8 @@ void Raytracer::createVertexAndIndexBuffer()
     std::vector<uint8_t> data(bufferSize, 0);
     size_t vertexOffset = 0;
     size_t indexOffset = m_model->vertexBufferSizeInBytes;
+    m_vertexDataSize = m_model->vertexBufferSizeInBytes;
+    m_indexDataSize = m_model->indexBufferSizeInBytes;
     int32_t vertexCountOffset = 0;
     uint32_t firstIndex = 0;
     for (size_t i = 0; i < m_model->primitives.size(); ++i)
@@ -1047,9 +856,6 @@ void Raytracer::createVertexAndIndexBuffer()
         indexOffset += indexDataSize;
     }
 
-    m_vertexDataSize = vertexOffset;
-    m_indexDataSize = indexOffset;
-
     VkPhysicalDevice physicalDevice = m_context.getPhysicalDevice();
     StagingBuffer stagingBuffer = createStagingBuffer(m_device, physicalDevice, data.data(), bufferSize);
 
@@ -1058,8 +864,8 @@ void Raytracer::createVertexAndIndexBuffer()
     bufferInfo.size = bufferSize;
     bufferInfo.usage = //
         VK_BUFFER_USAGE_TRANSFER_DST_BIT | //
-        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | //
-        VK_BUFFER_USAGE_INDEX_BUFFER_BIT | //
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | //
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | //
         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
@@ -1336,7 +1142,7 @@ void Raytracer::createTLAS()
     VkBufferDeviceAddressInfo tlasScratchBufferDeviceAddressInfo{};
     tlasScratchBufferDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
     tlasScratchBufferDeviceAddressInfo.pNext = NULL;
-    tlasScratchBufferDeviceAddressInfo.buffer = m_tlasBuffer;
+    tlasScratchBufferDeviceAddressInfo.buffer = m_tlasScratchBuffer;
 
     VkDeviceAddress tlasScratchBufferDeviceAddress = m_pvkGetBufferDeviceAddressKHR(m_device, &tlasScratchBufferDeviceAddressInfo);
 
@@ -1358,6 +1164,147 @@ void Raytracer::createTLAS()
     m_pvkCmdBuildAccelerationStructuresKHR(cb, 1, &tlasBuildGeometryInfo, &tlasBuildRangeInfos);
 
     endSingleTimeCommands(m_context.getGraphicsQueue(), command);
+}
+
+void Raytracer::updateCommonDescriptorSets()
+{
+    // Infos
+    VkWriteDescriptorSetAccelerationStructureKHR accelerationStructureDescriptorInfo{};
+    accelerationStructureDescriptorInfo.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
+    accelerationStructureDescriptorInfo.pNext = NULL;
+    accelerationStructureDescriptorInfo.accelerationStructureCount = 1;
+    accelerationStructureDescriptorInfo.pAccelerationStructures = &m_tlas;
+
+    VkDescriptorBufferInfo uniformDescriptorInfo{};
+    uniformDescriptorInfo.buffer = m_commonUniformBuffer;
+    uniformDescriptorInfo.offset = 0;
+    uniformDescriptorInfo.range = VK_WHOLE_SIZE;
+
+    VkDescriptorBufferInfo indexDescriptorInfo{};
+    indexDescriptorInfo.buffer = m_attributeBuffer;
+    indexDescriptorInfo.offset = m_primitiveInfos[0].indexOffset;
+    indexDescriptorInfo.range = m_indexDataSize;
+
+    VkDescriptorBufferInfo vertexDescriptorInfo{};
+    vertexDescriptorInfo.buffer = m_attributeBuffer;
+    vertexDescriptorInfo.offset = 0;
+    vertexDescriptorInfo.range = m_vertexDataSize;
+
+    VkDescriptorImageInfo imageDescriptorInfo{};
+    imageDescriptorInfo.sampler = VK_NULL_HANDLE;
+    imageDescriptorInfo.imageView = m_colorImageView;
+    imageDescriptorInfo.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+
+    // Write sets
+    VkWriteDescriptorSet writeAccelerationStructure{};
+    writeAccelerationStructure.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeAccelerationStructure.pNext = &accelerationStructureDescriptorInfo;
+    writeAccelerationStructure.dstSet = m_commonDescriptorSet;
+    writeAccelerationStructure.dstBinding = 0;
+    writeAccelerationStructure.dstArrayElement = 0;
+    writeAccelerationStructure.descriptorCount = 1;
+    writeAccelerationStructure.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    writeAccelerationStructure.pImageInfo = NULL;
+    writeAccelerationStructure.pBufferInfo = NULL;
+    writeAccelerationStructure.pTexelBufferView = NULL;
+
+    VkWriteDescriptorSet writeUniformBuffer{};
+    writeUniformBuffer.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeUniformBuffer.pNext = NULL;
+    writeUniformBuffer.dstSet = m_commonDescriptorSet;
+    writeUniformBuffer.dstBinding = 1;
+    writeUniformBuffer.dstArrayElement = 0;
+    writeUniformBuffer.descriptorCount = 1;
+    writeUniformBuffer.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    writeUniformBuffer.pImageInfo = NULL;
+    writeUniformBuffer.pBufferInfo = &uniformDescriptorInfo;
+    writeUniformBuffer.pTexelBufferView = NULL;
+
+    VkWriteDescriptorSet writeIndexBuffer{};
+    writeIndexBuffer.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeIndexBuffer.pNext = NULL;
+    writeIndexBuffer.dstSet = m_commonDescriptorSet;
+    writeIndexBuffer.dstBinding = 2;
+    writeIndexBuffer.dstArrayElement = 0;
+    writeIndexBuffer.descriptorCount = 1;
+    writeIndexBuffer.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writeIndexBuffer.pImageInfo = NULL;
+    writeIndexBuffer.pBufferInfo = &indexDescriptorInfo;
+    writeIndexBuffer.pTexelBufferView = NULL;
+
+    VkWriteDescriptorSet writeVertexBuffer{};
+    writeVertexBuffer.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeVertexBuffer.pNext = NULL;
+    writeVertexBuffer.dstSet = m_commonDescriptorSet;
+    writeVertexBuffer.dstBinding = 3;
+    writeVertexBuffer.dstArrayElement = 0;
+    writeVertexBuffer.descriptorCount = 1;
+    writeVertexBuffer.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writeVertexBuffer.pImageInfo = NULL;
+    writeVertexBuffer.pBufferInfo = &vertexDescriptorInfo;
+    writeVertexBuffer.pTexelBufferView = NULL;
+
+    VkWriteDescriptorSet writeImage{};
+    writeImage.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeImage.pNext = NULL;
+    writeImage.dstSet = m_commonDescriptorSet;
+    writeImage.dstBinding = 4;
+    writeImage.dstArrayElement = 0;
+    writeImage.descriptorCount = 1;
+    writeImage.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    writeImage.pImageInfo = &imageDescriptorInfo;
+    writeImage.pBufferInfo = NULL;
+    writeImage.pTexelBufferView = NULL;
+
+    std::vector<VkWriteDescriptorSet> writeDescriptorSets{
+        writeAccelerationStructure, //
+        writeUniformBuffer, //
+        writeIndexBuffer, //
+        writeVertexBuffer, //
+        writeImage //
+    };
+
+    vkUpdateDescriptorSets(m_device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
+}
+
+void Raytracer::updateMaterialDescriptorSet()
+{
+}
+
+void Raytracer::updateTexturesDescriptorSets()
+{
+    const std::vector<Model::Material>& materials = m_model->materials;
+    const size_t materialCount = m_model->materials.size();
+    std::vector<VkWriteDescriptorSet> descriptorWrites(materialCount * 3);
+
+    const size_t imageCount = m_model->images.size();
+    std::vector<VkDescriptorImageInfo> imageInfos(imageCount);
+    for (size_t i = 0; i < imageCount; ++i)
+    {
+        VkDescriptorImageInfo& imageInfo = imageInfos[i];
+        imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        imageInfo.imageView = m_imageViews[i];
+        imageInfo.sampler = m_sampler;
+    }
+
+    for (size_t i = 0; i < materialCount; ++i)
+    {
+        const size_t offset = i * 3;
+        const std::vector<int> materialIndices{materials[i].baseColor, materials[i].metallicRoughnessImage, materials[i].normalImage};
+        for (size_t j = 0; j < materialIndices.size(); ++j)
+        {
+            descriptorWrites[offset + j].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            descriptorWrites[offset + j].dstSet = m_texturesDescriptorSets[i];
+            descriptorWrites[offset + j].dstBinding = j;
+            descriptorWrites[offset + j].dstArrayElement = 0;
+            descriptorWrites[offset + j].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            descriptorWrites[offset + j].descriptorCount = 1;
+            const int materialIndex = materialIndices[j] != -1 ? materialIndices[j] : 0;
+            descriptorWrites[offset + j].pImageInfo = &imageInfos[materialIndex];
+        }
+    }
+
+    vkUpdateDescriptorSets(m_device, ui32Size(descriptorWrites), descriptorWrites.data(), 0, nullptr);
 }
 
 void Raytracer::createShaderBindingTable()

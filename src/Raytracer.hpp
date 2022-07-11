@@ -33,8 +33,7 @@ private:
     void releaseModel();
     void setupCamera();
     void updateCamera(double deltaTime);
-    void createMsaaColorImage();
-    void createDepthImage();
+    void createColorImage();
     void createSwapchainImageViews();
     void createSampler();
     void createTextures();
@@ -48,13 +47,13 @@ private:
     void allocateMaterialIndexDescriptorSets();
     void allocateTextureDescriptorSets();
     void createCommonUniformBuffer();
-    void updateCommonDescriptorSets();
-    void updateMaterialDescriptorSet();
-    void updateTexturesDescriptorSets();
     void createVertexAndIndexBuffer();
     void allocateCommandBuffers();
     void createBLAS();
     void createTLAS();
+    void updateCommonDescriptorSets();
+    void updateMaterialDescriptorSet();
+    void updateTexturesDescriptorSets();
     void createShaderBindingTable();
 
     Context& m_context;
@@ -73,12 +72,9 @@ private:
     Camera m_camera;
     std::chrono::steady_clock::time_point m_lastRenderTime;
     std::unordered_map<int, bool> m_keysDown;
-    VkImage m_msaaColorImage;
-    VkDeviceMemory m_msaaColorImageMemory;
-    VkImageView m_msaaColorImageView;
-    VkImage m_depthImage;
-    VkDeviceMemory m_depthImageMemory;
-    VkImageView m_depthImageView;
+    VkImage m_colorImage;
+    VkDeviceMemory m_colorImageMemory;
+    VkImageView m_colorImageView;
     std::vector<VkImageView> m_swapchainImageViews;
     VkSampler m_sampler;
     std::vector<VkImage> m_images;

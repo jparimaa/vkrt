@@ -307,9 +307,15 @@ VkDeviceMemory allocateAndBindMemory(VkDevice device, VkPhysicalDevice physicalD
     const MemoryTypeResult memoryTypeResult = findMemoryType(physicalDevice, memoryRequirements.memoryTypeBits, propertyFlags);
     CHECK(memoryTypeResult.found);
 
+    VkMemoryAllocateFlagsInfo memoryAllocateFlagsInfo{};
+    memoryAllocateFlagsInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+    memoryAllocateFlagsInfo.pNext = NULL;
+    memoryAllocateFlagsInfo.flags = VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
+    memoryAllocateFlagsInfo.deviceMask = 0;
+
     VkMemoryAllocateInfo memoryAllocateInfo{};
     memoryAllocateInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    memoryAllocateInfo.pNext = NULL;
+    memoryAllocateInfo.pNext = &memoryAllocateFlagsInfo;
     memoryAllocateInfo.allocationSize = memoryRequirements.size;
     memoryAllocateInfo.memoryTypeIndex = memoryTypeResult.typeIndex;
 
