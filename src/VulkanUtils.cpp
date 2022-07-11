@@ -324,3 +324,9 @@ VkDeviceMemory allocateAndBindMemory(VkDevice device, VkPhysicalDevice physicalD
     VK_CHECK(vkBindBufferMemory(device, buffer, memory, 0));
     return memory;
 }
+
+void destroyBufferAndFreeMemory(VkDevice device, VkBuffer buffer, VkDeviceMemory memory)
+{
+    vkDestroyBuffer(device, buffer, nullptr);
+    vkFreeMemory(device, memory, nullptr);
+}

@@ -93,3 +93,4 @@ StagingBuffer createStagingBuffer(VkDevice device, VkPhysicalDevice physicalDevi
 void releaseStagingBuffer(VkDevice device, const StagingBuffer& buffer);
 VkBuffer createBuffer(VkDevice device, VkDeviceSize size, VkBufferUsageFlags usageFlags);
 VkDeviceMemory allocateAndBindMemory(VkDevice device, VkPhysicalDevice physicalDevice, VkBuffer buffer, VkMemoryPropertyFlagBits propertyFlags);
+void destroyBufferAndFreeMemory(VkDevice device, VkBuffer buffer, VkDeviceMemory memory);

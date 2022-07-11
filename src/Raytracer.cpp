@@ -69,15 +69,23 @@ Raytracer::~Raytracer()
 {
     vkDeviceWaitIdle(m_device);
 
-    vkDestroyBuffer(m_device, m_attributeBuffer, nullptr);
-    vkFreeMemory(m_device, m_attributeBufferMemory, nullptr);
-    vkDestroyBuffer(m_device, m_commonUniformBuffer, nullptr);
-    vkFreeMemory(m_device, m_commonUniformBufferMemory, nullptr);
+    destroyBufferAndFreeMemory(m_device, m_attributeBuffer, m_attributeBufferMemory);
+    destroyBufferAndFreeMemory(m_device, m_commonUniformBuffer, m_commonUniformBufferMemory);
+    destroyBufferAndFreeMemory(m_device, m_tlasBuffer, m_tlasMemory);
+    destroyBufferAndFreeMemory(m_device, m_blasBuffer, m_blasMemory);
+    destroyBufferAndFreeMemory(m_device, m_blasGeometryInstanceBuffer, m_blasGeometryInstanceMemory);
+    destroyBufferAndFreeMemory(m_device, m_shaderBindingTableBuffer, m_shaderBindingTableMemory);
+
+    m_pvkDestroyAccelerationStructureKHR(m_device, m_tlas, nullptr);
+    m_pvkDestroyAccelerationStructureKHR(m_device, m_blas, nullptr);
+
     vkDestroyDescriptorPool(m_device, m_descriptorPool, nullptr);
     vkDestroyPipeline(m_device, m_pipeline, nullptr);
     vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
-    vkDestroyDescriptorSetLayout(m_device, m_texturesDescriptorSetLayout, nullptr);
+    vkDestroyDescriptorSetLayout(m_device, m_materialDescriptorSetLayout, nullptr);
     vkDestroyDescriptorSetLayout(m_device, m_commonDescriptorSetLayout, nullptr);
+
+    vkDestroySampler(m_device, m_sampler, nullptr);
 
     for (const VkImageView& imageView : m_imageViews)
     {
@@ -90,8 +98,6 @@ Raytracer::~Raytracer()
     }
 
     vkFreeMemory(m_device, m_imageMemory, nullptr);
-
-    vkDestroySampler(m_device, m_sampler, nullptr);
 
     for (const VkImageView& imageView : m_swapchainImageViews)
     {
@@ -129,6 +135,41 @@ bool Raytracer::render()
         vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_pipelineLayout, 0, ui32Size(descriptorSets), descriptorSets.data(), 0, nullptr);
 
         m_pvkCmdTraceRaysKHR(cb, &m_rgenShaderBindingTable, &m_rmissShaderBindingTable, &m_rchitShaderBindingTable, &m_callableShaderBindingTable, c_windowWidth, c_windowHeight, 1);
+
+        {
+            const std::vector<VkImage>& swapchainImages = m_context.getSwapchainImages();
+
+            VkImageMemoryBarrier swapchainLayoutBarrier{};
+            swapchainLayoutBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            swapchainLayoutBarrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+            swapchainLayoutBarrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            swapchainLayoutBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            swapchainLayoutBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            swapchainLayoutBarrier.image = swapchainImages[imageIndex];
+            swapchainLayoutBarrier.subresourceRange = c_defaultSubresourceRance;
+            swapchainLayoutBarrier.srcAccessMask = 0;
+            swapchainLayoutBarrier.dstAccessMask = 0;
+
+            vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &swapchainLayoutBarrier);
+
+            VkImageCopy region{};
+            region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            region.srcSubresource.baseArrayLayer = 0;
+            region.srcSubresource.mipLevel = 0;
+            region.srcSubresource.layerCount = 1;
+            region.srcOffset = {0, 0, 0};
+            region.dstSubresource = region.srcSubresource;
+            region.dstOffset = region.srcOffset;
+            region.extent = {c_windowWidth, c_windowHeight, 1};
+
+            vkCmdCopyImage(cb, m_colorImage, VK_IMAGE_LAYOUT_GENERAL, swapchainImages[imageIndex], VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+            swapchainLayoutBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+            swapchainLayoutBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+            vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &swapchainLayoutBarrier);
+        }
+
         DebugMarker::endLabel(cb);
     }
 
@@ -188,6 +229,8 @@ void Raytracer::getFunctionPointers()
     CHECK(m_pvkGetRayTracingShaderGroupHandlesKHR);
     m_pvkCmdTraceRaysKHR = (PFN_vkCmdTraceRaysKHR)vkGetDeviceProcAddr(m_device, "vkCmdTraceRaysKHR");
     CHECK(m_pvkCmdTraceRaysKHR);
+    m_pvkDestroyAccelerationStructureKHR = (PFN_vkDestroyAccelerationStructureKHR)vkGetDeviceProcAddr(m_device, "vkDestroyAccelerationStructureKHR");
+    CHECK(m_pvkDestroyAccelerationStructureKHR);
 }
 
 void Raytracer::loadModel()
@@ -272,13 +315,13 @@ void Raytracer::createColorImage()
     imageInfo.format = c_surfaceFormat.format;
     imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
     imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+    imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
     imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
     imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     imageInfo.flags = 0;
 
     VK_CHECK(vkCreateImage(m_device, &imageInfo, nullptr, &m_colorImage));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_IMAGE, m_colorImage, "Image - MSAA color");
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_IMAGE, m_colorImage, "Image - Color");
 
     VkMemoryRequirements memRequirements;
     vkGetImageMemoryRequirements(m_device, m_colorImage, &memRequirements);
@@ -292,7 +335,7 @@ void Raytracer::createColorImage()
     allocInfo.memoryTypeIndex = memoryTypeResult.typeIndex;
 
     VK_CHECK(vkAllocateMemory(m_device, &allocInfo, nullptr, &m_colorImageMemory));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_colorImageMemory, "Memory - MSAA color image");
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_colorImageMemory, "Memory - Color image");
     VK_CHECK(vkBindImageMemory(m_device, m_colorImage, m_colorImageMemory, 0));
 
     VkImageViewCreateInfo createInfo{};
@@ -304,7 +347,27 @@ void Raytracer::createColorImage()
     createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 
     VK_CHECK(vkCreateImageView(m_device, &createInfo, nullptr, &m_colorImageView));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_IMAGE_VIEW, m_colorImageView, "Image view - MSAA color");
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_IMAGE_VIEW, m_colorImageView, "Image view - Color");
+
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.image = m_colorImage;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+    barrier.srcAccessMask = VK_ACCESS_NONE;
+    barrier.dstAccessMask = VK_ACCESS_NONE;
+
+    const SingleTimeCommand command = beginSingleTimeCommands(m_context.getGraphicsCommandPool(), m_device);
+    const VkCommandBuffer& cb = command.commandBuffer;
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    endSingleTimeCommands(m_context.getGraphicsQueue(), command);
 }
 
 void Raytracer::createSwapchainImageViews()
@@ -326,6 +389,26 @@ void Raytracer::createSwapchainImageViews()
         createInfo.subresourceRange = c_defaultSubresourceRance;
 
         VK_CHECK(vkCreateImageView(m_device, &createInfo, nullptr, &m_swapchainImageViews[i]));
+
+        VkImageMemoryBarrier barrier{};
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier.image = swapchainImages[i];
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        barrier.subresourceRange.baseArrayLayer = 0;
+        barrier.subresourceRange.layerCount = 1;
+        barrier.subresourceRange.levelCount = 1;
+        barrier.subresourceRange.baseMipLevel = 0;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        barrier.srcAccessMask = VK_ACCESS_NONE;
+        barrier.dstAccessMask = VK_ACCESS_NONE;
+
+        const SingleTimeCommand command = beginSingleTimeCommands(m_context.getGraphicsCommandPool(), m_device);
+        const VkCommandBuffer& cb = command.commandBuffer;
+        vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+        endSingleTimeCommands(m_context.getGraphicsQueue(), command);
     }
 }
 
@@ -1007,13 +1090,16 @@ void Raytracer::createBLAS()
     m_blasDeviceAddress = m_pvkGetAccelerationStructureDeviceAddressKHR(m_device, &blasDeviceAddressInfo);
 
     // Create BLAS scratch buffer
-    m_blasScratchBuffer = createBuffer(m_device, blasBuildSizesInfo.buildScratchSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
-    m_blasScratchMemory = allocateAndBindMemory(m_device, physicalDevice, m_blasScratchBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    VkBuffer blasScratchBuffer;
+    VkDeviceMemory blasScratchMemory;
+
+    blasScratchBuffer = createBuffer(m_device, blasBuildSizesInfo.buildScratchSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
+    blasScratchMemory = allocateAndBindMemory(m_device, physicalDevice, blasScratchBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
     VkBufferDeviceAddressInfo blasScratchBufferDeviceAddressInfo{};
     blasScratchBufferDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
     blasScratchBufferDeviceAddressInfo.pNext = NULL;
-    blasScratchBufferDeviceAddressInfo.buffer = m_blasScratchBuffer;
+    blasScratchBufferDeviceAddressInfo.buffer = blasScratchBuffer;
 
     VkDeviceAddress blasScratchBufferDeviceAddress = m_pvkGetBufferDeviceAddressKHR(m_device, &blasScratchBufferDeviceAddressInfo);
 
@@ -1035,6 +1121,8 @@ void Raytracer::createBLAS()
     m_pvkCmdBuildAccelerationStructuresKHR(cb, 1, &blasBuildGeometryInfo, &blasBuildRangeInfos);
 
     endSingleTimeCommands(m_context.getGraphicsQueue(), command);
+
+    destroyBufferAndFreeMemory(m_device, blasScratchBuffer, blasScratchMemory);
 }
 
 void Raytracer::createTLAS()
@@ -1129,6 +1217,9 @@ void Raytracer::createTLAS()
     VK_CHECK(m_pvkCreateAccelerationStructureKHR(m_device, &tlasCreateInfo, NULL, &m_tlas));
 
     // TLAS scratch buffer
+    VkBuffer tlasScratchBuffer;
+    VkDeviceMemory tlasScratchMemory;
+
     VkAccelerationStructureDeviceAddressInfoKHR tlasDeviceAddressInfo{};
     tlasDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
     tlasDeviceAddressInfo.pNext = NULL;
@@ -1136,13 +1227,13 @@ void Raytracer::createTLAS()
 
     VkDeviceAddress tlasDeviceAddress = m_pvkGetAccelerationStructureDeviceAddressKHR(m_device, &tlasDeviceAddressInfo);
 
-    m_tlasScratchBuffer = createBuffer(m_device, tlasBuildSizesInfo.buildScratchSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
-    m_tlasScratchMemory = allocateAndBindMemory(m_device, physicalDevice, m_tlasScratchBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    tlasScratchBuffer = createBuffer(m_device, tlasBuildSizesInfo.buildScratchSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
+    tlasScratchMemory = allocateAndBindMemory(m_device, physicalDevice, tlasScratchBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
     VkBufferDeviceAddressInfo tlasScratchBufferDeviceAddressInfo{};
     tlasScratchBufferDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
     tlasScratchBufferDeviceAddressInfo.pNext = NULL;
-    tlasScratchBufferDeviceAddressInfo.buffer = m_tlasScratchBuffer;
+    tlasScratchBufferDeviceAddressInfo.buffer = tlasScratchBuffer;
 
     VkDeviceAddress tlasScratchBufferDeviceAddress = m_pvkGetBufferDeviceAddressKHR(m_device, &tlasScratchBufferDeviceAddressInfo);
 
@@ -1164,6 +1255,8 @@ void Raytracer::createTLAS()
     m_pvkCmdBuildAccelerationStructuresKHR(cb, 1, &tlasBuildGeometryInfo, &tlasBuildRangeInfos);
 
     endSingleTimeCommands(m_context.getGraphicsQueue(), command);
+
+    destroyBufferAndFreeMemory(m_device, tlasScratchBuffer, tlasScratchMemory);
 }
 
 void Raytracer::updateCommonDescriptorSets()

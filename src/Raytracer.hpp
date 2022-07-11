@@ -67,6 +67,7 @@ private:
     PFN_vkCmdBuildAccelerationStructuresKHR m_pvkCmdBuildAccelerationStructuresKHR;
     PFN_vkGetRayTracingShaderGroupHandlesKHR m_pvkGetRayTracingShaderGroupHandlesKHR;
     PFN_vkCmdTraceRaysKHR m_pvkCmdTraceRaysKHR;
+    PFN_vkDestroyAccelerationStructureKHR m_pvkDestroyAccelerationStructureKHR;
 
     std::unique_ptr<Model> m_model{nullptr};
     Camera m_camera;
@@ -100,16 +101,13 @@ private:
     VkDeviceMemory m_blasMemory;
     VkAccelerationStructureKHR m_blas;
     VkDeviceAddress m_blasDeviceAddress;
-    VkBuffer m_blasScratchBuffer;
-    VkDeviceMemory m_blasScratchMemory;
 
     VkBuffer m_blasGeometryInstanceBuffer;
     VkDeviceMemory m_blasGeometryInstanceMemory;
     VkBuffer m_tlasBuffer;
     VkDeviceMemory m_tlasMemory;
     VkAccelerationStructureKHR m_tlas;
-    VkBuffer m_tlasScratchBuffer;
-    VkDeviceMemory m_tlasScratchMemory;
+
     VkBuffer m_shaderBindingTableBuffer;
     VkDeviceMemory m_shaderBindingTableMemory;
     VkStridedDeviceAddressRegionKHR m_rchitShaderBindingTable{};
