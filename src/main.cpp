@@ -1,16 +1,18 @@
 
 #include "Context.hpp"
 #include "Renderer.hpp"
+#include "Raytracer.hpp"
 
 int main(void)
 {
     Context context;
-    Renderer renderer(context);
+    //Renderer graphicsApp(context);
+    Raytracer graphicsApp(context);
 
     bool running = true;
     while (running)
     {
-        running = renderer.render();
+        running = graphicsApp.render();
     }
 
     return 0;

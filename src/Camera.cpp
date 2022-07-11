@@ -14,6 +14,11 @@ Camera::Camera()
     m_projectionMatrix[1][1] *= -1; // Compensate for differences in GLM and VK systems
 }
 
+glm::vec3 Camera::getPosition() const
+{
+    return m_position;
+}
+
 glm::vec3 Camera::getForward() const
 {
     const glm::vec4 forward4Comp = glm::yawPitchRoll(m_rotation.y, m_rotation.x, m_rotation.z) * c_forwardZero;

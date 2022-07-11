@@ -36,7 +36,7 @@ function(add_shader TARGET SHADER)
 
     add_custom_command(
            OUTPUT ${_shader_output_path}
-           COMMAND ${GLSLC} -o ${_shader_output_path} ${_shader_src_path}
+           COMMAND ${GLSLC} --target-env=vulkan1.2 -o ${_shader_output_path} ${_shader_src_path}
            DEPENDS ${_shader_src_path}
            IMPLICIT_DEPENDS CXX ${_shader_src_path}
            VERBATIM)
