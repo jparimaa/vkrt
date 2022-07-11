@@ -97,6 +97,24 @@ void main() {
                   vertexC * barycentric.z;
   vec3 geometricNormal = normalize(cross(vertexB - vertexA, vertexC - vertexA));
 
+  vec3 hemisphere = uniformSampleHemisphere(vec2(random(gl_LaunchIDEXT.xy, camera.frameCount), random(gl_LaunchIDEXT.xy, camera.frameCount + 1)));
+  vec3 alignedHemisphere = alignHemisphereWithCoordinateSystem(hemisphere, geometricNormal);
+
+  payload.directColor = vec3(0.6, 0.3, 0.1);
+  payload.indirectColor += vec3(0.1, 0.3, 0.2);
+
+
+  payload.rayOrigin = position;
+  payload.rayDirection = alignedHemisphere;
+  payload.previousNormal = geometricNormal;
+
+  payload.rayDepth += 1;
+  payload.rayActive = 0;
+  return;
+
+
+
+  /*
   vec3 surfaceColor = vec3(0.3, 0.5, 0.7)* (gl_PrimitiveID / 100.0);
       //materialBuffer.data[materialIndexBuffer.data[gl_PrimitiveID]].diffuse;
 
@@ -185,4 +203,5 @@ void main() {
   payload.previousNormal = geometricNormal;
 
   payload.rayDepth += 1;
+  */
 }

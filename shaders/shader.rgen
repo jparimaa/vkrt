@@ -59,6 +59,7 @@ void main() {
 
   vec4 color = vec4(payload.directColor + payload.indirectColor, 1.0);
 
+/*
   if (camera.frameCount > 0) {
     vec4 previousColor = imageLoad(image, ivec2(gl_LaunchIDEXT.xy));
     previousColor *= camera.frameCount;
@@ -66,6 +67,6 @@ void main() {
     color += previousColor;
     color /= (camera.frameCount + 1);
   }
-
+*/
   imageStore(image, ivec2(gl_LaunchIDEXT.xy), color);
 }

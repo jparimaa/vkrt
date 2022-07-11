@@ -32,14 +32,14 @@ public:
         std::vector<unsigned char> data;
     };
 
+    using Index = uint32_t;
+
     struct Primitive
     {
         std::vector<Vertex> vertices;
-        std::vector<uint32_t> indices;
+        std::vector<Index> indices;
         int material = -1;
     };
-
-    using Index = uint32_t;
 
     Model(const std::string& filename);
     ~Model() {}

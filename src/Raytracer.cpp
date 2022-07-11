@@ -63,13 +63,16 @@ Raytracer::Raytracer(Context& context) :
     //updateTexturesDescriptorSets();
     createShaderBindingTable();
     releaseModel();
+
+    m_camera.setPosition({476.1832f, 128.5883f, 230.4587f});
 }
 
 Raytracer::~Raytracer()
 {
     vkDeviceWaitIdle(m_device);
 
-    destroyBufferAndFreeMemory(m_device, m_attributeBuffer, m_attributeBufferMemory);
+    destroyBufferAndFreeMemory(m_device, m_vertexBuffer, m_vertexBufferMemory);
+    destroyBufferAndFreeMemory(m_device, m_indexBuffer, m_indexBufferMemory);
     destroyBufferAndFreeMemory(m_device, m_commonUniformBuffer, m_commonUniformBufferMemory);
     destroyBufferAndFreeMemory(m_device, m_tlasBuffer, m_tlasMemory);
     destroyBufferAndFreeMemory(m_device, m_blasBuffer, m_blasMemory);
@@ -878,113 +881,88 @@ void Raytracer::allocateTextureDescriptorSets()
 
 void Raytracer::createCommonUniformBuffer()
 {
-    const VkMemoryPropertyFlags memoryProperties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
     const uint64_t bufferSize = c_uniformBufferSize * m_context.getSwapchainImages().size();
 
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = bufferSize;
-    bufferInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    VK_CHECK(vkCreateBuffer(m_device, &bufferInfo, nullptr, &m_commonUniformBuffer));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_BUFFER, m_commonUniformBuffer, "Buffer - Raytracer common uniform buffer");
-
-    VkMemoryRequirements memRequirements;
-    vkGetBufferMemoryRequirements(m_device, m_commonUniformBuffer, &memRequirements);
-
-    const MemoryTypeResult memoryTypeResult = findMemoryType(m_context.getPhysicalDevice(), memRequirements.memoryTypeBits, memoryProperties);
-    CHECK(memoryTypeResult.found);
-
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.allocationSize = memRequirements.size;
-    allocInfo.memoryTypeIndex = memoryTypeResult.typeIndex;
-
-    VK_CHECK(vkAllocateMemory(m_device, &allocInfo, nullptr, &m_commonUniformBufferMemory));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_commonUniformBufferMemory, "Memory - Raytracer common uniform buffer");
-
-    VK_CHECK(vkBindBufferMemory(m_device, m_commonUniformBuffer, m_commonUniformBufferMemory, 0));
+    m_commonUniformBuffer = createBuffer(m_device, bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+    m_commonUniformBufferMemory = allocateAndBindMemory(m_device, m_context.getPhysicalDevice(), m_commonUniformBuffer, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_BUFFER, m_commonUniformBuffer, "Buffer - Common uniform buffer");
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_commonUniformBufferMemory, "Memory - Common uniform buffer");
 }
 
 void Raytracer::createVertexAndIndexBuffer()
 {
     m_primitiveInfos.resize(m_model->primitives.size());
-    const uint64_t bufferSize = m_model->vertexBufferSizeInBytes + m_model->indexBufferSizeInBytes;
-    std::vector<uint8_t> data(bufferSize, 0);
-    size_t vertexOffset = 0;
-    size_t indexOffset = m_model->vertexBufferSizeInBytes;
     m_vertexDataSize = m_model->vertexBufferSizeInBytes;
     m_indexDataSize = m_model->indexBufferSizeInBytes;
-    int32_t vertexCountOffset = 0;
-    uint32_t firstIndex = 0;
+    std::vector<uint8_t> vertexData(m_vertexDataSize, 0);
+    std::vector<uint8_t> indexData(m_indexDataSize, 0);
+    size_t vertexOffset = 0;
+    size_t indexOffset = 0;
     for (size_t i = 0; i < m_model->primitives.size(); ++i)
     {
         const Model::Primitive& primitive = m_model->primitives[i];
 
         m_primitiveInfos[i].indexCount = ui32Size(primitive.indices);
-        m_primitiveInfos[i].vertexCountOffset = vertexCountOffset;
         m_primitiveInfos[i].indexOffset = indexOffset;
-        m_primitiveInfos[i].firstIndex = firstIndex;
         m_primitiveInfos[i].material = primitive.material;
-
-        vertexCountOffset += static_cast<int32_t>(primitive.vertices.size());
-        firstIndex += ui32Size(primitive.indices);
 
         const size_t vertexDataSize = sizeof(Model::Vertex) * primitive.vertices.size();
         const size_t indexDataSize = sizeof(Model::Index) * primitive.indices.size();
-        std::memcpy(&data[vertexOffset], primitive.vertices.data(), vertexDataSize);
-        std::memcpy(&data[indexOffset], primitive.indices.data(), indexDataSize);
+        std::memcpy(&vertexData[vertexOffset], primitive.vertices.data(), vertexDataSize);
+        std::memcpy(&indexData[indexOffset], primitive.indices.data(), indexDataSize);
         vertexOffset += vertexDataSize;
         indexOffset += indexDataSize;
     }
 
-    VkPhysicalDevice physicalDevice = m_context.getPhysicalDevice();
-    StagingBuffer stagingBuffer = createStagingBuffer(m_device, physicalDevice, data.data(), bufferSize);
-
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = bufferSize;
-    bufferInfo.usage = //
+    const VkPhysicalDevice physicalDevice = m_context.getPhysicalDevice();
+    const VkBufferUsageFlags usage = //
         VK_BUFFER_USAGE_TRANSFER_DST_BIT | //
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | //
         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | //
         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    VK_CHECK(vkCreateBuffer(m_device, &bufferInfo, nullptr, &m_attributeBuffer));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_BUFFER, m_attributeBuffer, "Buffer - Attribute");
+    { // Vertex
+        StagingBuffer stagingBuffer = createStagingBuffer(m_device, physicalDevice, vertexData.data(), m_vertexDataSize);
 
-    VkMemoryRequirements memoryRequirements;
-    vkGetBufferMemoryRequirements(m_device, m_attributeBuffer, &memoryRequirements);
-    VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
-    const VkMemoryPropertyFlags memoryProperties = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-    const MemoryTypeResult memoryTypeResult = findMemoryType(physicalDevice, memoryRequirements.memoryTypeBits, memoryProperties);
-    CHECK(memoryTypeResult.found);
+        m_vertexBuffer = createBuffer(m_device, m_model->vertexBufferSizeInBytes, usage);
+        m_vertexBufferMemory = allocateAndBindMemory(m_device, physicalDevice, m_vertexBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        DebugMarker::setObjectName(VK_OBJECT_TYPE_BUFFER, m_vertexBuffer, "Buffer - Vertex");
+        DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_vertexBufferMemory, "Memory - Vertex buffer");
 
-    VkMemoryAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    allocInfo.pNext = &c_memoryAllocateFlagsInfo;
-    allocInfo.allocationSize = memoryRequirements.size;
-    allocInfo.memoryTypeIndex = memoryTypeResult.typeIndex;
+        const SingleTimeCommand command = beginSingleTimeCommands(m_context.getGraphicsCommandPool(), m_device);
 
-    VK_CHECK(vkAllocateMemory(m_device, &allocInfo, nullptr, &m_attributeBufferMemory));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_attributeBufferMemory, "Memory - Attribute buffer");
+        VkBufferCopy vertexCopyRegion{};
+        vertexCopyRegion.size = m_model->vertexBufferSizeInBytes;
+        vertexCopyRegion.srcOffset = 0;
+        vertexCopyRegion.dstOffset = 0;
 
-    VK_CHECK(vkBindBufferMemory(m_device, m_attributeBuffer, m_attributeBufferMemory, 0));
+        vkCmdCopyBuffer(command.commandBuffer, stagingBuffer.buffer, m_vertexBuffer, 1, &vertexCopyRegion);
 
-    const SingleTimeCommand command = beginSingleTimeCommands(m_context.getGraphicsCommandPool(), m_device);
+        endSingleTimeCommands(m_context.getGraphicsQueue(), command);
 
-    VkBufferCopy vertexCopyRegion{};
-    vertexCopyRegion.size = bufferSize;
-    vertexCopyRegion.srcOffset = 0;
-    vertexCopyRegion.dstOffset = 0;
+        releaseStagingBuffer(m_device, stagingBuffer);
+    }
+    { // Index
+        StagingBuffer stagingBuffer = createStagingBuffer(m_device, physicalDevice, indexData.data(), m_indexDataSize);
 
-    vkCmdCopyBuffer(command.commandBuffer, stagingBuffer.buffer, m_attributeBuffer, 1, &vertexCopyRegion);
+        m_indexBuffer = createBuffer(m_device, m_model->indexBufferSizeInBytes, usage);
+        m_indexBufferMemory = allocateAndBindMemory(m_device, physicalDevice, m_indexBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        DebugMarker::setObjectName(VK_OBJECT_TYPE_BUFFER, m_indexBuffer, "Buffer - Index");
+        DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_indexBufferMemory, "Memory - Index buffer");
 
-    endSingleTimeCommands(m_context.getGraphicsQueue(), command);
+        const SingleTimeCommand command = beginSingleTimeCommands(m_context.getGraphicsCommandPool(), m_device);
 
-    releaseStagingBuffer(m_device, stagingBuffer);
+        VkBufferCopy indexCopyRegion{};
+        indexCopyRegion.size = m_model->indexBufferSizeInBytes;
+        indexCopyRegion.srcOffset = 0;
+        indexCopyRegion.dstOffset = 0;
+
+        vkCmdCopyBuffer(command.commandBuffer, stagingBuffer.buffer, m_indexBuffer, 1, &indexCopyRegion);
+
+        endSingleTimeCommands(m_context.getGraphicsQueue(), command);
+
+        releaseStagingBuffer(m_device, stagingBuffer);
+    }
 }
 
 void Raytracer::allocateCommandBuffers()
@@ -1008,14 +986,19 @@ void Raytracer::createBLAS()
     VkBufferDeviceAddressInfo vertexBufferDeviceAddressInfo{};
     vertexBufferDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
     vertexBufferDeviceAddressInfo.pNext = NULL;
-    vertexBufferDeviceAddressInfo.buffer = m_attributeBuffer;
+    vertexBufferDeviceAddressInfo.buffer = m_vertexBuffer;
 
-    VkDeviceAddress vertexBufferDeviceAddress = m_pvkGetBufferDeviceAddressKHR(m_device, &vertexBufferDeviceAddressInfo);
-    VkDeviceAddress indexBufferDeviceAddress = vertexBufferDeviceAddress + m_primitiveInfos[0].indexOffset;
+    VkBufferDeviceAddressInfo indexBufferDeviceAddressInfo{};
+    indexBufferDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
+    indexBufferDeviceAddressInfo.pNext = NULL;
+    indexBufferDeviceAddressInfo.buffer = m_indexBuffer;
+
+    const VkDeviceAddress vertexBufferDeviceAddress = m_pvkGetBufferDeviceAddressKHR(m_device, &vertexBufferDeviceAddressInfo);
+    const VkDeviceAddress indexBufferDeviceAddress = m_pvkGetBufferDeviceAddressKHR(m_device, &indexBufferDeviceAddressInfo);
 
     uint32_t vertexCount = 0;
     uint32_t triangleCount = 0;
-    for (size_t i = 0; i < m_model->primitives.size(); ++i)
+    for (size_t i = 0; i < 1 /* m_model->primitives.size()*/; ++i)
     {
         vertexCount += static_cast<uint32_t>(m_model->primitives[i].vertices.size());
         CHECK(m_model->primitives[i].indices.size() % 3 == 0);
@@ -1132,7 +1115,7 @@ void Raytracer::createTLAS()
     // Setup BLAS instance buffer
     // clang-format off
     const std::vector<float> matrixData{
-        1.0f, 0.0f, 0.0f, 0.0f, 
+        1.0f, 0.0f, 0.0f, 0.0f,
         0.0f, 1.0f, 0.0f, 0.0f,
         0.0f, 0.0f, 1.0f, 0.0f
     };
@@ -1274,14 +1257,14 @@ void Raytracer::updateCommonDescriptorSets()
     uniformDescriptorInfo.range = VK_WHOLE_SIZE;
 
     VkDescriptorBufferInfo indexDescriptorInfo{};
-    indexDescriptorInfo.buffer = m_attributeBuffer;
-    indexDescriptorInfo.offset = m_primitiveInfos[0].indexOffset;
-    indexDescriptorInfo.range = m_indexDataSize;
+    indexDescriptorInfo.buffer = m_indexBuffer;
+    indexDescriptorInfo.offset = 0;
+    indexDescriptorInfo.range = VK_WHOLE_SIZE;
 
     VkDescriptorBufferInfo vertexDescriptorInfo{};
-    vertexDescriptorInfo.buffer = m_attributeBuffer;
+    vertexDescriptorInfo.buffer = m_vertexBuffer;
     vertexDescriptorInfo.offset = 0;
-    vertexDescriptorInfo.range = m_vertexDataSize;
+    vertexDescriptorInfo.range = VK_WHOLE_SIZE;
 
     VkDescriptorImageInfo imageDescriptorInfo{};
     imageDescriptorInfo.sampler = VK_NULL_HANDLE;

@@ -91,8 +91,10 @@ private:
     std::vector<VkDescriptorSet> m_texturesDescriptorSets;
     VkBuffer m_commonUniformBuffer;
     VkDeviceMemory m_commonUniformBufferMemory;
-    VkBuffer m_attributeBuffer;
-    VkDeviceMemory m_attributeBufferMemory;
+    VkBuffer m_vertexBuffer;
+    VkDeviceMemory m_vertexBufferMemory;
+    VkBuffer m_indexBuffer;
+    VkDeviceMemory m_indexBufferMemory;
     std::vector<PrimitiveInfo> m_primitiveInfos;
     size_t m_vertexDataSize;
     size_t m_indexDataSize;
