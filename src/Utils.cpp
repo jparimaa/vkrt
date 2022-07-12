@@ -7,7 +7,7 @@
 
 glm::vec4 toVec4(glm::vec3 v, float w)
 {
-    return glm::vec4(v.x, v.y, v.x, w);
+    return glm::vec4(v.x, v.y, v.z, w);
 }
 
 std::filesystem::path getCurrentExecutableDirectory()

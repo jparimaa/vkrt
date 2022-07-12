@@ -5,13 +5,14 @@ layout(location = 0) rayPayloadInEXT Payload {
   vec3 rayOrigin;
   vec3 rayDirection;
   vec3 previousNormal;
-
   vec3 directColor;
   vec3 indirectColor;
   int rayDepth;
-
   int rayActive;
 }
 payload;
 
-void main() { payload.rayActive = 0; }
+void main() {
+  payload.rayActive = 2;
+  payload.directColor = vec3(0.0, 0.0, 0.2);
+}

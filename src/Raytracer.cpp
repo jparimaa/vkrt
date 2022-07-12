@@ -14,6 +14,8 @@ namespace
 {
 struct UniformBufferInfo
 {
+    glm::mat4 viewInverse;
+    glm::mat4 projInverse;
     glm::vec4 position;
     glm::vec4 right;
     glm::vec4 up;
@@ -39,12 +41,12 @@ Raytracer::Raytracer(Context& context) :
     m_lastRenderTime(std::chrono::high_resolution_clock::now())
 {
     getFunctionPointers();
-    loadModel();
+    //loadModel();
     setupCamera();
     createColorImage();
     createSwapchainImageViews();
     createSampler();
-    createTextures();
+    //createTextures();
     createCommonDescriptorSetLayout();
     createMaterialDescriptorSetLayout();
     createTexturesDescriptorSetLayout();
@@ -63,8 +65,6 @@ Raytracer::Raytracer(Context& context) :
     //updateTexturesDescriptorSets();
     createShaderBindingTable();
     releaseModel();
-
-    m_camera.setPosition({476.1832f, 128.5883f, 230.4587f});
 }
 
 Raytracer::~Raytracer()
@@ -89,7 +89,7 @@ Raytracer::~Raytracer()
     vkDestroyDescriptorSetLayout(m_device, m_commonDescriptorSetLayout, nullptr);
 
     vkDestroySampler(m_device, m_sampler, nullptr);
-
+    /*
     for (const VkImageView& imageView : m_imageViews)
     {
         vkDestroyImageView(m_device, imageView, nullptr);
@@ -101,7 +101,7 @@ Raytracer::~Raytracer()
     }
 
     vkFreeMemory(m_device, m_imageMemory, nullptr);
-
+    */
     for (const VkImageView& imageView : m_swapchainImageViews)
     {
         vkDestroyImageView(m_device, imageView, nullptr);
@@ -208,6 +208,9 @@ bool Raytracer::update(uint32_t imageIndex)
     uniformBufferInfo.position = toVec4(m_camera.getPosition(), 1.0f);
     uniformBufferInfo.frameCount = 0;
 
+    uniformBufferInfo.projInverse = glm::inverse(m_camera.getProjectionMatrix());
+    uniformBufferInfo.viewInverse = glm::inverse(m_camera.getViewMatrix());
+
     std::memcpy(dst, &uniformBufferInfo, static_cast<size_t>(c_uniformBufferSize));
     vkUnmapMemory(m_device, m_commonUniformBufferMemory);
 
@@ -248,8 +251,7 @@ void Raytracer::releaseModel()
 
 void Raytracer::setupCamera()
 {
-    m_camera.setPosition(glm::vec3{-4.0f, 2.0f, -0.2f});
-    m_camera.setRotation(glm::vec3{0.0f, 1.51f, 0.0f});
+    m_camera.setPosition({0.0f, 0.0f, 3.0f});
 }
 
 void Raytracer::updateCamera(double deltaTime)
@@ -813,7 +815,7 @@ void Raytracer::createDescriptorPool()
 {
     const uint32_t swapchainLength = static_cast<uint32_t>(m_context.getSwapchainImages().size());
     const uint32_t numSetsForGUI = 1;
-    const uint32_t numSetsForModel = ui32Size(m_model->materials);
+    const uint32_t numSetsForModel = 0; //ui32Size(m_model->materials);
 
     const uint32_t imageDescriptorCount = numSetsForModel + numSetsForGUI;
 
@@ -891,6 +893,7 @@ void Raytracer::createCommonUniformBuffer()
 
 void Raytracer::createVertexAndIndexBuffer()
 {
+    /*
     m_primitiveInfos.resize(m_model->primitives.size());
     m_vertexDataSize = m_model->vertexBufferSizeInBytes;
     m_indexDataSize = m_model->indexBufferSizeInBytes;
@@ -913,6 +916,26 @@ void Raytracer::createVertexAndIndexBuffer()
         vertexOffset += vertexDataSize;
         indexOffset += indexDataSize;
     }
+    */
+    // clang-format off
+    const std::vector<float> vertices{
+        0.0f, 0.0f, 0.0f, 
+        1.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f,
+
+        1.0f, 1.0f, 0.0f, 
+        1.0f, 0.0f, 0.0f,
+        0.0f, 1.0f, 0.0f
+    };
+    // clang-format on
+    m_vertexDataSize = sizeof(float) * vertices.size();
+    const std::vector<uint32_t> indices{0, 1, 2, 3, 4, 5};
+    m_indexDataSize = sizeof(uint32_t) * indices.size();
+
+    std::vector<uint8_t> vertexData(m_vertexDataSize, 0);
+    std::vector<uint8_t> indexData(m_indexDataSize, 0);
+    std::memcpy(&vertexData[0], vertices.data(), m_vertexDataSize);
+    std::memcpy(&indexData[0], indices.data(), m_indexDataSize);
 
     const VkPhysicalDevice physicalDevice = m_context.getPhysicalDevice();
     const VkBufferUsageFlags usage = //
@@ -924,7 +947,7 @@ void Raytracer::createVertexAndIndexBuffer()
     { // Vertex
         StagingBuffer stagingBuffer = createStagingBuffer(m_device, physicalDevice, vertexData.data(), m_vertexDataSize);
 
-        m_vertexBuffer = createBuffer(m_device, m_model->vertexBufferSizeInBytes, usage);
+        m_vertexBuffer = createBuffer(m_device, m_vertexDataSize, usage);
         m_vertexBufferMemory = allocateAndBindMemory(m_device, physicalDevice, m_vertexBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
         DebugMarker::setObjectName(VK_OBJECT_TYPE_BUFFER, m_vertexBuffer, "Buffer - Vertex");
         DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_vertexBufferMemory, "Memory - Vertex buffer");
@@ -932,7 +955,7 @@ void Raytracer::createVertexAndIndexBuffer()
         const SingleTimeCommand command = beginSingleTimeCommands(m_context.getGraphicsCommandPool(), m_device);
 
         VkBufferCopy vertexCopyRegion{};
-        vertexCopyRegion.size = m_model->vertexBufferSizeInBytes;
+        vertexCopyRegion.size = m_vertexDataSize;
         vertexCopyRegion.srcOffset = 0;
         vertexCopyRegion.dstOffset = 0;
 
@@ -945,7 +968,7 @@ void Raytracer::createVertexAndIndexBuffer()
     { // Index
         StagingBuffer stagingBuffer = createStagingBuffer(m_device, physicalDevice, indexData.data(), m_indexDataSize);
 
-        m_indexBuffer = createBuffer(m_device, m_model->indexBufferSizeInBytes, usage);
+        m_indexBuffer = createBuffer(m_device, m_indexDataSize, usage);
         m_indexBufferMemory = allocateAndBindMemory(m_device, physicalDevice, m_indexBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
         DebugMarker::setObjectName(VK_OBJECT_TYPE_BUFFER, m_indexBuffer, "Buffer - Index");
         DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_indexBufferMemory, "Memory - Index buffer");
@@ -953,7 +976,7 @@ void Raytracer::createVertexAndIndexBuffer()
         const SingleTimeCommand command = beginSingleTimeCommands(m_context.getGraphicsCommandPool(), m_device);
 
         VkBufferCopy indexCopyRegion{};
-        indexCopyRegion.size = m_model->indexBufferSizeInBytes;
+        indexCopyRegion.size = m_indexDataSize;
         indexCopyRegion.srcOffset = 0;
         indexCopyRegion.dstOffset = 0;
 
@@ -996,21 +1019,23 @@ void Raytracer::createBLAS()
     const VkDeviceAddress vertexBufferDeviceAddress = m_pvkGetBufferDeviceAddressKHR(m_device, &vertexBufferDeviceAddressInfo);
     const VkDeviceAddress indexBufferDeviceAddress = m_pvkGetBufferDeviceAddressKHR(m_device, &indexBufferDeviceAddressInfo);
 
-    uint32_t vertexCount = 0;
-    uint32_t triangleCount = 0;
-    for (size_t i = 0; i < 1 /* m_model->primitives.size()*/; ++i)
+    uint32_t vertexCount = 6;
+    uint32_t triangleCount = 2;
+    /*
+    for (size_t i = 0; i < m_model->primitives.size(); ++i)
     {
         vertexCount += static_cast<uint32_t>(m_model->primitives[i].vertices.size());
         CHECK(m_model->primitives[i].indices.size() % 3 == 0);
         triangleCount += static_cast<uint32_t>(m_model->primitives[i].indices.size() / 3);
     }
+    */
 
     VkAccelerationStructureGeometryDataKHR blasGeometryData{};
     blasGeometryData.triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
     blasGeometryData.triangles.pNext = NULL;
     blasGeometryData.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
     blasGeometryData.triangles.vertexData = VkDeviceOrHostAddressConstKHR{vertexBufferDeviceAddress};
-    blasGeometryData.triangles.vertexStride = sizeof(Model::Vertex);
+    blasGeometryData.triangles.vertexStride = sizeof(float) * 3;
     blasGeometryData.triangles.maxVertex = vertexCount;
     blasGeometryData.triangles.indexType = VK_INDEX_TYPE_UINT32;
     blasGeometryData.triangles.indexData = VkDeviceOrHostAddressConstKHR{indexBufferDeviceAddress};
@@ -1122,7 +1147,6 @@ void Raytracer::createTLAS()
     // clang-format on
     VkAccelerationStructureInstanceKHR blasInstance{};
     std::memcpy(blasInstance.transform.matrix, matrixData.data(), sizeof(float) * matrixData.size());
-
     blasInstance.instanceCustomIndex = 0;
     blasInstance.mask = 0xFF;
     blasInstance.instanceShaderBindingTableRecordOffset = 0;
@@ -1203,15 +1227,17 @@ void Raytracer::createTLAS()
     VkBuffer tlasScratchBuffer;
     VkDeviceMemory tlasScratchMemory;
 
+    tlasScratchBuffer = createBuffer(m_device, tlasBuildSizesInfo.buildScratchSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
+    tlasScratchMemory = allocateAndBindMemory(m_device, physicalDevice, tlasScratchBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+    /*
     VkAccelerationStructureDeviceAddressInfoKHR tlasDeviceAddressInfo{};
     tlasDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
     tlasDeviceAddressInfo.pNext = NULL;
     tlasDeviceAddressInfo.accelerationStructure = m_tlas;
 
     VkDeviceAddress tlasDeviceAddress = m_pvkGetAccelerationStructureDeviceAddressKHR(m_device, &tlasDeviceAddressInfo);
-
-    tlasScratchBuffer = createBuffer(m_device, tlasBuildSizesInfo.buildScratchSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
-    tlasScratchMemory = allocateAndBindMemory(m_device, physicalDevice, tlasScratchBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    */
 
     VkBufferDeviceAddressInfo tlasScratchBufferDeviceAddressInfo{};
     tlasScratchBufferDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
