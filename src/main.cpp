@@ -1,4 +1,3 @@
-
 #include "Context.hpp"
 #include "Renderer.hpp"
 #include "Raytracer.hpp"

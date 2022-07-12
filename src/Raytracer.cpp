@@ -251,7 +251,8 @@ void Raytracer::releaseModel()
 
 void Raytracer::setupCamera()
 {
-    m_camera.setPosition({4.95f, 1.48f, 5.1f});
+    m_camera.setPosition({6.3f, 4.5f, -0.7f});
+    m_camera.setRotation({0.0f, 1.57f, 0.0f});
 }
 
 void Raytracer::updateCamera(double deltaTime)
@@ -897,19 +898,28 @@ void Raytracer::createVertexAndIndexBuffer()
     m_indexDataSize = m_model->indexBufferSizeInBytes;
     std::vector<uint8_t> vertexData(m_vertexDataSize, 0);
     std::vector<uint8_t> indexData(m_indexDataSize, 0);
+
+    const int indexCount = m_indexDataSize / sizeof(Model::Index);
+    std::vector<Model::Index> indices(indexCount);
+    int indexCounter = 0;
+    Model::Index indexOffset = 0;
     size_t vertexOffset = 0;
-    size_t indexOffset = 0;
-    for (size_t i = 0; i < m_model->primitives.size(); ++i)
+    for (const Model::Primitive& primitive : m_model->primitives)
     {
-        const Model::Primitive& primitive = m_model->primitives[i];
+        for (Model::Index index : primitive.indices)
+        {
+            indices[indexCounter] = indexOffset + index;
+            ++indexCounter;
+        }
+        indexOffset += primitive.vertices.size();
 
         const size_t vertexSize = sizeof(Model::Vertex) * primitive.vertices.size();
-        const size_t indexSize = sizeof(Model::Index) * primitive.indices.size();
         std::memcpy(&vertexData[vertexOffset], primitive.vertices.data(), vertexSize);
-        std::memcpy(&indexData[indexOffset], primitive.indices.data(), indexSize);
         vertexOffset += vertexSize;
-        indexOffset += indexSize;
     }
+
+    CHECK(m_indexDataSize == (sizeof(Model::Index) * indices.size()));
+    std::memcpy(&indexData[0], indices.data(), m_indexDataSize);
 
     const VkPhysicalDevice physicalDevice = m_context.getPhysicalDevice();
     const VkBufferUsageFlags usage = //
@@ -987,32 +997,23 @@ void Raytracer::createBLAS()
     const VkDeviceAddress vertexBufferDeviceAddress = m_pvkGetBufferDeviceAddressKHR(m_device, &vertexBufferDeviceAddressInfo);
     const VkDeviceAddress indexBufferDeviceAddress = m_pvkGetBufferDeviceAddressKHR(m_device, &indexBufferDeviceAddressInfo);
 
-    uint32_t vertexCount = 0;
-    uint32_t triangleCount = 0;
-    for (size_t i = 0; i < 1 /*m_model->primitives.size()*/; ++i)
-    {
-        vertexCount += static_cast<uint32_t>(m_model->primitives[i].vertices.size());
-        CHECK(m_model->primitives[i].indices.size() % 3 == 0);
-        triangleCount += static_cast<uint32_t>(m_model->primitives[i].indices.size() / 3);
-    }
+    VkAccelerationStructureGeometryDataKHR geometryData{};
+    geometryData.triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+    geometryData.triangles.pNext = NULL;
+    geometryData.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+    geometryData.triangles.vertexData = VkDeviceOrHostAddressConstKHR{vertexBufferDeviceAddress};
+    geometryData.triangles.vertexStride = sizeof(Model::Vertex);
+    geometryData.triangles.maxVertex = m_vertexDataSize / sizeof(Model::Vertex);
+    geometryData.triangles.indexType = VK_INDEX_TYPE_UINT32;
+    geometryData.triangles.indexData = VkDeviceOrHostAddressConstKHR{indexBufferDeviceAddress};
+    geometryData.triangles.transformData = VkDeviceOrHostAddressConstKHR{0};
 
-    VkAccelerationStructureGeometryDataKHR blasGeometryData{};
-    blasGeometryData.triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
-    blasGeometryData.triangles.pNext = NULL;
-    blasGeometryData.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-    blasGeometryData.triangles.vertexData = VkDeviceOrHostAddressConstKHR{vertexBufferDeviceAddress};
-    blasGeometryData.triangles.vertexStride = sizeof(Model::Vertex);
-    blasGeometryData.triangles.maxVertex = vertexCount;
-    blasGeometryData.triangles.indexType = VK_INDEX_TYPE_UINT32;
-    blasGeometryData.triangles.indexData = VkDeviceOrHostAddressConstKHR{indexBufferDeviceAddress};
-    blasGeometryData.triangles.transformData = VkDeviceOrHostAddressConstKHR{0};
-
-    VkAccelerationStructureGeometryKHR blasGeometry{};
-    blasGeometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
-    blasGeometry.pNext = NULL;
-    blasGeometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-    blasGeometry.geometry = blasGeometryData;
-    blasGeometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+    VkAccelerationStructureGeometryKHR geometry{};
+    geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+    geometry.pNext = NULL;
+    geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+    geometry.geometry = geometryData;
+    geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
 
     VkAccelerationStructureBuildGeometryInfoKHR blasBuildGeometryInfo{};
     blasBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
@@ -1023,7 +1024,7 @@ void Raytracer::createBLAS()
     blasBuildGeometryInfo.srcAccelerationStructure = VK_NULL_HANDLE;
     blasBuildGeometryInfo.dstAccelerationStructure = VK_NULL_HANDLE;
     blasBuildGeometryInfo.geometryCount = 1;
-    blasBuildGeometryInfo.pGeometries = &blasGeometry;
+    blasBuildGeometryInfo.pGeometries = &geometry;
     blasBuildGeometryInfo.ppGeometries = NULL;
     blasBuildGeometryInfo.scratchData = VkDeviceOrHostAddressKHR{0};
 
@@ -1034,10 +1035,11 @@ void Raytracer::createBLAS()
     blasBuildSizesInfo.updateScratchSize = 0;
     blasBuildSizesInfo.buildScratchSize = 0;
 
-    const std::vector<uint32_t> maxPrimitiveCounts = {triangleCount};
+    const uint32_t triangleCount = static_cast<uint32_t>(m_indexDataSize / sizeof(Model::Index) / 3);
+    const std::vector<uint32_t> triangleCounts{triangleCount};
 
     const VkAccelerationStructureBuildTypeKHR buildType = VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR;
-    m_pvkGetAccelerationStructureBuildSizesKHR(m_device, buildType, &blasBuildGeometryInfo, maxPrimitiveCounts.data(), &blasBuildSizesInfo);
+    m_pvkGetAccelerationStructureBuildSizesKHR(m_device, buildType, &blasBuildGeometryInfo, triangleCounts.data(), &blasBuildSizesInfo);
 
     // Create BLAS buffer
     m_blasBuffer = createBuffer(m_device, blasBuildSizesInfo.accelerationStructureSize, VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_STORAGE_BIT_KHR);
@@ -1089,11 +1091,8 @@ void Raytracer::createBLAS()
 
     const SingleTimeCommand command = beginSingleTimeCommands(m_context.getGraphicsCommandPool(), m_device);
     const VkCommandBuffer& cb = command.commandBuffer;
-
     const VkAccelerationStructureBuildRangeInfoKHR* blasBuildRangeInfos = &blasBuildRangeInfo;
-
     m_pvkCmdBuildAccelerationStructuresKHR(cb, 1, &blasBuildGeometryInfo, &blasBuildRangeInfos);
-
     endSingleTimeCommands(m_context.getGraphicsQueue(), command);
 
     destroyBufferAndFreeMemory(m_device, blasScratchBuffer, blasScratchMemory);
