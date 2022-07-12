@@ -17,15 +17,6 @@ public:
     bool render();
 
 private:
-    struct PrimitiveInfo
-    {
-        int32_t vertexCountOffset{0};
-        VkDeviceSize indexOffset{0};
-        uint32_t indexCount;
-        uint32_t firstIndex;
-        int material;
-    };
-
     bool update(uint32_t imageIndex);
 
     void getFunctionPointers();
@@ -95,7 +86,6 @@ private:
     VkDeviceMemory m_vertexBufferMemory;
     VkBuffer m_indexBuffer;
     VkDeviceMemory m_indexBufferMemory;
-    std::vector<PrimitiveInfo> m_primitiveInfos;
     size_t m_vertexDataSize;
     size_t m_indexDataSize;
 

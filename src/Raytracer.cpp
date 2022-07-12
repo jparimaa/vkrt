@@ -41,7 +41,7 @@ Raytracer::Raytracer(Context& context) :
     m_lastRenderTime(std::chrono::high_resolution_clock::now())
 {
     getFunctionPointers();
-    //loadModel();
+    loadModel();
     setupCamera();
     createColorImage();
     createSwapchainImageViews();
@@ -251,7 +251,7 @@ void Raytracer::releaseModel()
 
 void Raytracer::setupCamera()
 {
-    m_camera.setPosition({0.0f, 0.0f, 3.0f});
+    m_camera.setPosition({4.95f, 1.48f, 5.1f});
 }
 
 void Raytracer::updateCamera(double deltaTime)
@@ -893,8 +893,6 @@ void Raytracer::createCommonUniformBuffer()
 
 void Raytracer::createVertexAndIndexBuffer()
 {
-    /*
-    m_primitiveInfos.resize(m_model->primitives.size());
     m_vertexDataSize = m_model->vertexBufferSizeInBytes;
     m_indexDataSize = m_model->indexBufferSizeInBytes;
     std::vector<uint8_t> vertexData(m_vertexDataSize, 0);
@@ -905,37 +903,13 @@ void Raytracer::createVertexAndIndexBuffer()
     {
         const Model::Primitive& primitive = m_model->primitives[i];
 
-        m_primitiveInfos[i].indexCount = ui32Size(primitive.indices);
-        m_primitiveInfos[i].indexOffset = indexOffset;
-        m_primitiveInfos[i].material = primitive.material;
-
-        const size_t vertexDataSize = sizeof(Model::Vertex) * primitive.vertices.size();
-        const size_t indexDataSize = sizeof(Model::Index) * primitive.indices.size();
-        std::memcpy(&vertexData[vertexOffset], primitive.vertices.data(), vertexDataSize);
-        std::memcpy(&indexData[indexOffset], primitive.indices.data(), indexDataSize);
-        vertexOffset += vertexDataSize;
-        indexOffset += indexDataSize;
+        const size_t vertexSize = sizeof(Model::Vertex) * primitive.vertices.size();
+        const size_t indexSize = sizeof(Model::Index) * primitive.indices.size();
+        std::memcpy(&vertexData[vertexOffset], primitive.vertices.data(), vertexSize);
+        std::memcpy(&indexData[indexOffset], primitive.indices.data(), indexSize);
+        vertexOffset += vertexSize;
+        indexOffset += indexSize;
     }
-    */
-    // clang-format off
-    const std::vector<float> vertices{
-        0.0f, 0.0f, 0.0f, 
-        1.0f, 0.0f, 0.0f,
-        0.0f, 1.0f, 0.0f,
-
-        1.0f, 1.0f, 0.0f, 
-        1.0f, 0.0f, 0.0f,
-        0.0f, 1.0f, 0.0f
-    };
-    // clang-format on
-    m_vertexDataSize = sizeof(float) * vertices.size();
-    const std::vector<uint32_t> indices{0, 1, 2, 3, 4, 5};
-    m_indexDataSize = sizeof(uint32_t) * indices.size();
-
-    std::vector<uint8_t> vertexData(m_vertexDataSize, 0);
-    std::vector<uint8_t> indexData(m_indexDataSize, 0);
-    std::memcpy(&vertexData[0], vertices.data(), m_vertexDataSize);
-    std::memcpy(&indexData[0], indices.data(), m_indexDataSize);
 
     const VkPhysicalDevice physicalDevice = m_context.getPhysicalDevice();
     const VkBufferUsageFlags usage = //
@@ -943,6 +917,10 @@ void Raytracer::createVertexAndIndexBuffer()
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | //
         VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | //
         VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+
+    VkBufferCopy copyRegion{};
+    copyRegion.srcOffset = 0;
+    copyRegion.dstOffset = 0;
 
     { // Vertex
         StagingBuffer stagingBuffer = createStagingBuffer(m_device, physicalDevice, vertexData.data(), m_vertexDataSize);
@@ -952,15 +930,10 @@ void Raytracer::createVertexAndIndexBuffer()
         DebugMarker::setObjectName(VK_OBJECT_TYPE_BUFFER, m_vertexBuffer, "Buffer - Vertex");
         DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_vertexBufferMemory, "Memory - Vertex buffer");
 
+        copyRegion.size = m_vertexDataSize;
+
         const SingleTimeCommand command = beginSingleTimeCommands(m_context.getGraphicsCommandPool(), m_device);
-
-        VkBufferCopy vertexCopyRegion{};
-        vertexCopyRegion.size = m_vertexDataSize;
-        vertexCopyRegion.srcOffset = 0;
-        vertexCopyRegion.dstOffset = 0;
-
-        vkCmdCopyBuffer(command.commandBuffer, stagingBuffer.buffer, m_vertexBuffer, 1, &vertexCopyRegion);
-
+        vkCmdCopyBuffer(command.commandBuffer, stagingBuffer.buffer, m_vertexBuffer, 1, &copyRegion);
         endSingleTimeCommands(m_context.getGraphicsQueue(), command);
 
         releaseStagingBuffer(m_device, stagingBuffer);
@@ -973,15 +946,10 @@ void Raytracer::createVertexAndIndexBuffer()
         DebugMarker::setObjectName(VK_OBJECT_TYPE_BUFFER, m_indexBuffer, "Buffer - Index");
         DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_indexBufferMemory, "Memory - Index buffer");
 
+        copyRegion.size = m_indexDataSize;
+
         const SingleTimeCommand command = beginSingleTimeCommands(m_context.getGraphicsCommandPool(), m_device);
-
-        VkBufferCopy indexCopyRegion{};
-        indexCopyRegion.size = m_indexDataSize;
-        indexCopyRegion.srcOffset = 0;
-        indexCopyRegion.dstOffset = 0;
-
-        vkCmdCopyBuffer(command.commandBuffer, stagingBuffer.buffer, m_indexBuffer, 1, &indexCopyRegion);
-
+        vkCmdCopyBuffer(command.commandBuffer, stagingBuffer.buffer, m_indexBuffer, 1, &copyRegion);
         endSingleTimeCommands(m_context.getGraphicsQueue(), command);
 
         releaseStagingBuffer(m_device, stagingBuffer);
@@ -1019,23 +987,21 @@ void Raytracer::createBLAS()
     const VkDeviceAddress vertexBufferDeviceAddress = m_pvkGetBufferDeviceAddressKHR(m_device, &vertexBufferDeviceAddressInfo);
     const VkDeviceAddress indexBufferDeviceAddress = m_pvkGetBufferDeviceAddressKHR(m_device, &indexBufferDeviceAddressInfo);
 
-    uint32_t vertexCount = 6;
-    uint32_t triangleCount = 2;
-    /*
-    for (size_t i = 0; i < m_model->primitives.size(); ++i)
+    uint32_t vertexCount = 0;
+    uint32_t triangleCount = 0;
+    for (size_t i = 0; i < 1 /*m_model->primitives.size()*/; ++i)
     {
         vertexCount += static_cast<uint32_t>(m_model->primitives[i].vertices.size());
         CHECK(m_model->primitives[i].indices.size() % 3 == 0);
         triangleCount += static_cast<uint32_t>(m_model->primitives[i].indices.size() / 3);
     }
-    */
 
     VkAccelerationStructureGeometryDataKHR blasGeometryData{};
     blasGeometryData.triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
     blasGeometryData.triangles.pNext = NULL;
     blasGeometryData.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
     blasGeometryData.triangles.vertexData = VkDeviceOrHostAddressConstKHR{vertexBufferDeviceAddress};
-    blasGeometryData.triangles.vertexStride = sizeof(float) * 3;
+    blasGeometryData.triangles.vertexStride = sizeof(Model::Vertex);
     blasGeometryData.triangles.maxVertex = vertexCount;
     blasGeometryData.triangles.indexType = VK_INDEX_TYPE_UINT32;
     blasGeometryData.triangles.indexData = VkDeviceOrHostAddressConstKHR{indexBufferDeviceAddress};
@@ -1140,9 +1106,9 @@ void Raytracer::createTLAS()
     // Setup BLAS instance buffer
     // clang-format off
     const std::vector<float> matrixData{
-        1.0f, 0.0f, 0.0f, 0.0f,
-        0.0f, 1.0f, 0.0f, 0.0f,
-        0.0f, 0.0f, 1.0f, 0.0f
+        0.01f, 0.0f, 0.0f, 0.0f,
+        0.0f, 0.01f, 0.0f, 0.0f,
+        0.0f, 0.0f, 0.01f, 0.0f
     };
     // clang-format on
     VkAccelerationStructureInstanceKHR blasInstance{};
@@ -1229,15 +1195,6 @@ void Raytracer::createTLAS()
 
     tlasScratchBuffer = createBuffer(m_device, tlasBuildSizesInfo.buildScratchSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT);
     tlasScratchMemory = allocateAndBindMemory(m_device, physicalDevice, tlasScratchBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-
-    /*
-    VkAccelerationStructureDeviceAddressInfoKHR tlasDeviceAddressInfo{};
-    tlasDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_DEVICE_ADDRESS_INFO_KHR;
-    tlasDeviceAddressInfo.pNext = NULL;
-    tlasDeviceAddressInfo.accelerationStructure = m_tlas;
-
-    VkDeviceAddress tlasDeviceAddress = m_pvkGetAccelerationStructureDeviceAddressKHR(m_device, &tlasDeviceAddressInfo);
-    */
 
     VkBufferDeviceAddressInfo tlasScratchBufferDeviceAddressInfo{};
     tlasScratchBufferDeviceAddressInfo.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO;
