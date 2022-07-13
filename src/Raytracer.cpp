@@ -72,6 +72,7 @@ Raytracer::~Raytracer()
 
     destroyBufferAndFreeMemory(m_device, m_vertexBuffer, m_vertexBufferMemory);
     destroyBufferAndFreeMemory(m_device, m_indexBuffer, m_indexBufferMemory);
+    destroyBufferAndFreeMemory(m_device, m_primitiveIndexBuffer, m_primitiveIndexBufferMemory);
     destroyBufferAndFreeMemory(m_device, m_commonBuffer, m_commonBufferMemory);
     destroyBufferAndFreeMemory(m_device, m_materialIndexBuffer, m_materialIndexBufferMemory);
     destroyBufferAndFreeMemory(m_device, m_tlasBuffer, m_tlasMemory);
@@ -647,10 +648,21 @@ void Raytracer::createVertexAndIndexBuffer()
         vertexOffset += vertexSize;
     }
 
+    m_triangleCount = indices.size() / 3;
+
+    std::vector<glm::uvec4> primitiveIndices(m_triangleCount);
+    size_t counter = 0;
+    for (size_t i = 0; i < indices.size(); i += 3)
+    {
+        primitiveIndices[counter].x = indices[i + 0];
+        primitiveIndices[counter].y = indices[i + 1];
+        primitiveIndices[counter].z = indices[i + 2];
+        primitiveIndices[counter].w = 0;
+        ++counter;
+    }
+
     CHECK(m_indexDataSize == (sizeof(Model::Index) * indices.size()));
     std::memcpy(&indexData[0], indices.data(), m_indexDataSize);
-
-    m_triangleCount = indices.size() / 3;
 
     const VkPhysicalDevice physicalDevice = m_context.getPhysicalDevice();
     const VkBufferUsageFlags usage = //
@@ -691,6 +703,23 @@ void Raytracer::createVertexAndIndexBuffer()
 
         const SingleTimeCommand command = beginSingleTimeCommands(m_context.getGraphicsCommandPool(), m_device);
         vkCmdCopyBuffer(command.commandBuffer, stagingBuffer.buffer, m_indexBuffer, 1, &copyRegion);
+        endSingleTimeCommands(m_context.getGraphicsQueue(), command);
+
+        releaseStagingBuffer(m_device, stagingBuffer);
+    }
+    { // Primitive Index
+        const uint64_t primitiveIndicesSize = primitiveIndices.size() * sizeof(primitiveIndices[0]);
+        StagingBuffer stagingBuffer = createStagingBuffer(m_device, physicalDevice, primitiveIndices.data(), primitiveIndicesSize);
+
+        m_primitiveIndexBuffer = createBuffer(m_device, primitiveIndicesSize, usage);
+        m_primitiveIndexBufferMemory = allocateAndBindMemory(m_device, physicalDevice, m_primitiveIndexBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        DebugMarker::setObjectName(VK_OBJECT_TYPE_BUFFER, m_primitiveIndexBuffer, "Buffer - Index");
+        DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_primitiveIndexBufferMemory, "Memory - Index buffer");
+
+        copyRegion.size = primitiveIndicesSize;
+
+        const SingleTimeCommand command = beginSingleTimeCommands(m_context.getGraphicsCommandPool(), m_device);
+        vkCmdCopyBuffer(command.commandBuffer, stagingBuffer.buffer, m_primitiveIndexBuffer, 1, &copyRegion);
         endSingleTimeCommands(m_context.getGraphicsQueue(), command);
 
         releaseStagingBuffer(m_device, stagingBuffer);
@@ -782,8 +811,17 @@ void Raytracer::createMaterialIndexDescriptorSetLayoutAndAllocate()
     bindings[0].stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
     bindings[0].pImmutableSamplers = nullptr;
 
+    VkDescriptorBindingFlagsEXT bindFlag = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT_EXT;
+
+    VkDescriptorSetLayoutBindingFlagsCreateInfoEXT extendedInfo{};
+    extendedInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO_EXT;
+    extendedInfo.pNext = nullptr;
+    extendedInfo.bindingCount = 1u;
+    extendedInfo.pBindingFlags = &bindFlag;
+
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layoutInfo.pNext = &extendedInfo;
     layoutInfo.bindingCount = ui32Size(bindings);
     layoutInfo.pBindings = bindings.data();
 
@@ -1231,7 +1269,7 @@ void Raytracer::updateCommonDescriptorSets()
     uniformDescriptorInfo.range = VK_WHOLE_SIZE;
 
     VkDescriptorBufferInfo indexDescriptorInfo{};
-    indexDescriptorInfo.buffer = m_indexBuffer;
+    indexDescriptorInfo.buffer = m_primitiveIndexBuffer;
     indexDescriptorInfo.offset = 0;
     indexDescriptorInfo.range = VK_WHOLE_SIZE;
 

@@ -300,11 +300,29 @@ void Context::createDevice()
         queueCreateInfos.push_back(queueCreateInfo);
     }
 
+    {
+        VkPhysicalDeviceDescriptorIndexingFeaturesEXT indexingFeatures{};
+        indexingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES_EXT;
+        indexingFeatures.pNext = nullptr;
+
+        VkPhysicalDeviceFeatures2 deviceFeatures{};
+        deviceFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
+        deviceFeatures.pNext = &indexingFeatures;
+        vkGetPhysicalDeviceFeatures2(m_physicalDevice, &deviceFeatures);
+        CHECK(indexingFeatures.descriptorBindingPartiallyBound && indexingFeatures.runtimeDescriptorArray);
+    }
+
     VkPhysicalDeviceFeatures deviceFeatures{};
+
+    VkPhysicalDeviceDescriptorIndexingFeaturesEXT indexingFeatures{};
+    indexingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES_EXT;
+    indexingFeatures.pNext = nullptr;
+    indexingFeatures.descriptorBindingPartiallyBound = VK_TRUE;
+    indexingFeatures.runtimeDescriptorArray = VK_TRUE;
 
     VkPhysicalDeviceBufferDeviceAddressFeatures physicalDeviceBufferDeviceAddressFeatures{};
     physicalDeviceBufferDeviceAddressFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
-    physicalDeviceBufferDeviceAddressFeatures.pNext = NULL;
+    physicalDeviceBufferDeviceAddressFeatures.pNext = &indexingFeatures;
     physicalDeviceBufferDeviceAddressFeatures.bufferDeviceAddress = VK_TRUE;
     physicalDeviceBufferDeviceAddressFeatures.bufferDeviceAddressCaptureReplay = VK_FALSE;
     physicalDeviceBufferDeviceAddressFeatures.bufferDeviceAddressMultiDevice = VK_FALSE;

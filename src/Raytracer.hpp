@@ -82,6 +82,8 @@ private:
     VkDeviceMemory m_vertexBufferMemory;
     VkBuffer m_indexBuffer;
     VkDeviceMemory m_indexBufferMemory;
+    VkBuffer m_primitiveIndexBuffer;
+    VkDeviceMemory m_primitiveIndexBufferMemory;
     size_t m_triangleCount;
     size_t m_vertexDataSize;
     size_t m_indexDataSize;

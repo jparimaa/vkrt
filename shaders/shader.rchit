@@ -4,7 +4,7 @@
 
 #define M_PI 3.1415926535897932384626433832795
 
-hitAttributeEXT vec2 hitCoordinate;
+hitAttributeEXT vec2 attribs;
 
 layout(location = 0) rayPayloadInEXT Payload {
   vec3 rayOrigin;
@@ -29,24 +29,41 @@ layout(binding = 1, set = 0) uniform Camera {
 }
 camera;
 
-layout(set = 0, binding = 2) buffer IndexBuffer { uint data[]; }
+struct Vertex
+{
+	vec3 position;
+	vec3 normal;
+	vec2 uv;
+	vec4 tangent;
+};
+
+// todo: better alignment
+layout(set = 0, binding = 2) buffer IndexBuffer { uvec4 data[]; }
 indexBuffer;
-layout(set = 0, binding = 3) buffer VertexBuffer { float data[]; }
+layout(set = 0, binding = 3) buffer VertexBuffer { Vertex data[]; }
 vertexBuffer;
 
 layout(set = 1, binding = 0) buffer MaterialIndexBuffer { uint data[]; }
 materialIndexBuffer;
 
-layout(set = 2, binding = 0) uniform texture2D textures[];
+layout(set = 2, binding = 0) uniform sampler2D textures[];
+
 
 
 void main() {
-  payload.rayActive = 0;
+	payload.rayActive = 0;
 
-  uint materialIndex = materialIndexBuffer.data[gl_PrimitiveID];
-  const vec3 barycentricCoords = vec3(1.0f - hitCoordinate.x - hitCoordinate.y, hitCoordinate.x, hitCoordinate.y);
-  payload.directColor = barycentricCoords * (10.0 / materialIndex);
+	const uvec4 index = indexBuffer.data[gl_PrimitiveID];
+	const Vertex v0 = vertexBuffer.data[index.x];
+	const Vertex v1 = vertexBuffer.data[index.y];
+	const Vertex v2 = vertexBuffer.data[index.z];
 
+	const vec3 barycentrics = vec3(1.0f - attribs.x - attribs.y, attribs.x, attribs.y);
+	const vec2 texCoord = v0.uv.xy * barycentrics.x + v1.uv.xy * barycentrics.y + v2.uv.xy * barycentrics.z;
 
-  return;
+	uint materialIndex = materialIndexBuffer.data[gl_PrimitiveID];
+
+	payload.directColor = texture(textures[materialIndex], texCoord).xyz;
+
+	return;
 }
