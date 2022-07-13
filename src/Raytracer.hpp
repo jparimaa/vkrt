@@ -30,9 +30,9 @@ private:
     void createMipmaps(VkImage image, uint32_t mipLevels, glm::uvec2 imageSize);
     void createVertexAndIndexBuffer();
     void createDescriptorPool();
-    void createAndAllocateCommonDescriptorSetLayout();
-    void createAndAllocateMaterialIndexDescriptorSetLayout();
-    void createAndAllocateTexturesDescriptorSetLayout();
+    void createCommonDescriptorSetLayoutAndAllocate();
+    void createMaterialIndexDescriptorSetLayoutAndAllocate();
+    void createTexturesDescriptorSetLayoutAndAllocate();
     void createPipeline();
     void createCommonBuffer();
     void createMaterialIndexBuffer();
@@ -77,7 +77,7 @@ private:
     VkDescriptorPool m_descriptorPool;
     VkDescriptorSet m_commonDescriptorSet;
     VkDescriptorSet m_materialIndexDescriptorSet;
-    std::vector<VkDescriptorSet> m_texturesDescriptorSets;
+    VkDescriptorSet m_texturesDescriptorSet;
     VkBuffer m_vertexBuffer;
     VkDeviceMemory m_vertexBufferMemory;
     VkBuffer m_indexBuffer;

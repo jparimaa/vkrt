@@ -46,7 +46,7 @@ Raytracer::Raytracer(Context& context) :
     createColorImage();
     createSwapchainImageViews();
     createSampler();
-    //createTextures();
+    createTextures();
     createVertexAndIndexBuffer();
     createDescriptorPool();
     createCommonDescriptorSetLayoutAndAllocate();
@@ -60,7 +60,7 @@ Raytracer::Raytracer(Context& context) :
     createTLAS();
     updateCommonDescriptorSets();
     updateMaterialIndexDescriptorSet();
-    //updateTexturesDescriptorSets();
+    updateTexturesDescriptorSets();
     createShaderBindingTable();
 
     m_model.reset();
@@ -85,11 +85,12 @@ Raytracer::~Raytracer()
     vkDestroyDescriptorPool(m_device, m_descriptorPool, nullptr);
     vkDestroyPipeline(m_device, m_pipeline, nullptr);
     vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
+    vkDestroyDescriptorSetLayout(m_device, m_texturesDescriptorSetLayout, nullptr);
     vkDestroyDescriptorSetLayout(m_device, m_materialIndexDescriptorSetLayout, nullptr);
     vkDestroyDescriptorSetLayout(m_device, m_commonDescriptorSetLayout, nullptr);
 
     vkDestroySampler(m_device, m_sampler, nullptr);
-    /*
+
     for (const VkImageView& imageView : m_imageViews)
     {
         vkDestroyImageView(m_device, imageView, nullptr);
@@ -101,7 +102,7 @@ Raytracer::~Raytracer()
     }
 
     vkFreeMemory(m_device, m_imageMemory, nullptr);
-    */
+
     for (const VkImageView& imageView : m_swapchainImageViews)
     {
         vkDestroyImageView(m_device, imageView, nullptr);
@@ -134,7 +135,7 @@ bool Raytracer::render()
         DebugMarker::beginLabel(cb, "Render", DebugMarker::blue);
         vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_pipeline);
 
-        const std::vector<VkDescriptorSet> descriptorSets{m_commonDescriptorSet, m_materialIndexDescriptorSet /*, m_texturesDescriptorSets[primitiveInfo.material]*/};
+        const std::vector<VkDescriptorSet> descriptorSets{m_commonDescriptorSet, m_materialIndexDescriptorSet, m_texturesDescriptorSet};
         vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_pipelineLayout, 0, ui32Size(descriptorSets), descriptorSets.data(), 0, nullptr);
 
         m_pvkCmdTraceRaysKHR(cb, &m_rgenShaderBindingTable, &m_rmissShaderBindingTable, &m_rchitShaderBindingTable, &m_callableShaderBindingTable, c_windowWidth, c_windowHeight, 1);
@@ -199,7 +200,8 @@ bool Raytracer::update(uint32_t imageIndex)
     updateCamera(deltaTime);
 
     void* dst;
-    VK_CHECK(vkMapMemory(m_device, m_commonBufferMemory, imageIndex * c_uniformBufferSize, c_uniformBufferSize, 0, &dst));
+    // Todo: ring buffer
+    VK_CHECK(vkMapMemory(m_device, m_commonBufferMemory, 0, c_uniformBufferSize, 0, &dst));
 
     UniformBufferInfo uniformBufferInfo{};
     uniformBufferInfo.forward = toVec4(m_camera.getForward(), 0.0f);
@@ -803,18 +805,12 @@ void Raytracer::createMaterialIndexDescriptorSetLayoutAndAllocate()
 
 void Raytracer::createTexturesDescriptorSetLayoutAndAllocate()
 {
-    /*
-    const uint32_t imageCount = 3;
-    std::vector<VkDescriptorSetLayoutBinding> bindings(imageCount);
-
-    for (uint32_t i = 0; i < imageCount; ++i)
-    {
-        bindings[i].binding = i;
-        bindings[i].descriptorCount = 1;
-        bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        bindings[i].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-        bindings[i].pImmutableSamplers = nullptr;
-    }
+    std::array<VkDescriptorSetLayoutBinding, 1> bindings{};
+    bindings[0].binding = 0;
+    bindings[0].descriptorCount = ui32Size(m_images);
+    bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    bindings[0].stageFlags = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+    bindings[0].pImmutableSamplers = nullptr;
 
     VkDescriptorSetLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -822,29 +818,22 @@ void Raytracer::createTexturesDescriptorSetLayoutAndAllocate()
     layoutInfo.pBindings = bindings.data();
 
     VK_CHECK(vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_texturesDescriptorSetLayout));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, m_texturesDescriptorSetLayout, "Desc set layout - Texture");
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, m_texturesDescriptorSetLayout, "Desc set layout - Textures");
 
-        const size_t materialCount = m_model->materials.size();
-    m_texturesDescriptorSets.resize(materialCount);
-    std::vector<VkDescriptorSetLayout> layouts(materialCount, m_texturesDescriptorSetLayout);
+    const std::vector<VkDescriptorSetLayout> layouts{m_texturesDescriptorSetLayout};
 
     VkDescriptorSetAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     allocInfo.descriptorPool = m_descriptorPool;
     allocInfo.descriptorSetCount = ui32Size(layouts);
     allocInfo.pSetLayouts = layouts.data();
-    VK_ERROR_FRAGMENTED_POOL;
-    VK_CHECK(vkAllocateDescriptorSets(m_device, &allocInfo, m_texturesDescriptorSets.data()));
-    for (size_t i = 0; i < m_texturesDescriptorSets.size(); ++i)
-    {
-        DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET, m_texturesDescriptorSets[i], "Desc set - Texture " + std::to_string(i));
-    }
-    */
+    VK_CHECK(vkAllocateDescriptorSets(m_device, &allocInfo, &m_texturesDescriptorSet));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET, m_texturesDescriptorSet, "Desc set - Textures");
 }
 
 void Raytracer::createPipeline()
 {
-    const std::vector<VkDescriptorSetLayout> descriptorSetLayouts{m_commonDescriptorSetLayout, m_materialIndexDescriptorSetLayout /*, m_texturesDescriptorSetLayout*/};
+    const std::vector<VkDescriptorSetLayout> descriptorSetLayouts{m_commonDescriptorSetLayout, m_materialIndexDescriptorSetLayout, m_texturesDescriptorSetLayout};
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = ui32Size(descriptorSetLayouts);
@@ -951,7 +940,7 @@ void Raytracer::createPipeline()
 
 void Raytracer::createCommonBuffer()
 {
-    const uint64_t bufferSize = c_uniformBufferSize * m_context.getSwapchainImages().size();
+    const uint64_t bufferSize = c_uniformBufferSize;
 
     m_commonBuffer = createBuffer(m_device, bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
     m_commonBufferMemory = allocateAndBindMemory(m_device, m_context.getPhysicalDevice(), m_commonBuffer, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
@@ -1381,11 +1370,7 @@ void Raytracer::updateMaterialIndexDescriptorSet()
 
 void Raytracer::updateTexturesDescriptorSets()
 {
-    const std::vector<Model::Material>& materials = m_model->materials;
-    const size_t materialCount = m_model->materials.size();
-    std::vector<VkWriteDescriptorSet> descriptorWrites(materialCount * 3);
-
-    const size_t imageCount = m_model->images.size();
+    const size_t imageCount = m_images.size();
     std::vector<VkDescriptorImageInfo> imageInfos(imageCount);
     for (size_t i = 0; i < imageCount; ++i)
     {
@@ -1395,24 +1380,17 @@ void Raytracer::updateTexturesDescriptorSets()
         imageInfo.sampler = m_sampler;
     }
 
-    for (size_t i = 0; i < materialCount; ++i)
-    {
-        const size_t offset = i * 3;
-        const std::vector<int> materialIndices{materials[i].baseColor, materials[i].metallicRoughnessImage, materials[i].normalImage};
-        for (size_t j = 0; j < materialIndices.size(); ++j)
-        {
-            descriptorWrites[offset + j].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            descriptorWrites[offset + j].dstSet = m_texturesDescriptorSets[i];
-            descriptorWrites[offset + j].dstBinding = j;
-            descriptorWrites[offset + j].dstArrayElement = 0;
-            descriptorWrites[offset + j].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            descriptorWrites[offset + j].descriptorCount = 1;
-            const int materialIndex = materialIndices[j] != -1 ? materialIndices[j] : 0;
-            descriptorWrites[offset + j].pImageInfo = &imageInfos[materialIndex];
-        }
-    }
+    VkWriteDescriptorSet writeSet{};
+    writeSet.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeSet.dstBinding = 0;
+    writeSet.dstArrayElement = 0;
+    writeSet.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    writeSet.descriptorCount = ui32Size(imageInfos);
+    writeSet.pBufferInfo = 0;
+    writeSet.dstSet = m_texturesDescriptorSet;
+    writeSet.pImageInfo = imageInfos.data();
 
-    vkUpdateDescriptorSets(m_device, ui32Size(descriptorWrites), descriptorWrites.data(), 0, nullptr);
+    vkUpdateDescriptorSets(m_device, 1, &writeSet, 0, nullptr);
 }
 
 void Raytracer::createShaderBindingTable()

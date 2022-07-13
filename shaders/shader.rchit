@@ -29,22 +29,24 @@ layout(binding = 1, set = 0) uniform Camera {
 }
 camera;
 
-layout(binding = 2, set = 0) buffer IndexBuffer { uint data[]; }
+layout(set = 0, binding = 2) buffer IndexBuffer { uint data[]; }
 indexBuffer;
-layout(binding = 3, set = 0) buffer VertexBuffer { float data[]; }
+layout(set = 0, binding = 3) buffer VertexBuffer { float data[]; }
 vertexBuffer;
 
-layout(binding = 0, set = 1) buffer MaterialIndexBuffer { uint data[]; }
+layout(set = 1, binding = 0) buffer MaterialIndexBuffer { uint data[]; }
 materialIndexBuffer;
-/*
-layout(binding = 1, set = 1) buffer MaterialBuffer { Material data[]; }
-materialBuffer;
-*/
+
+layout(set = 2, binding = 0) uniform texture2D textures[];
+
 
 void main() {
   payload.rayActive = 0;
 
+  uint materialIndex = materialIndexBuffer.data[gl_PrimitiveID];
   const vec3 barycentricCoords = vec3(1.0f - hitCoordinate.x - hitCoordinate.y, hitCoordinate.x, hitCoordinate.y);
-  payload.directColor = barycentricCoords;
+  payload.directColor = barycentricCoords * (10.0 / materialIndex);
+
+
   return;
 }
