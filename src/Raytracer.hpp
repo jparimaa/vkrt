@@ -21,7 +21,6 @@ private:
 
     void getFunctionPointers();
     void loadModel();
-    void releaseModel();
     void setupCamera();
     void updateCamera(double deltaTime);
     void createColorImage();
@@ -29,21 +28,19 @@ private:
     void createSampler();
     void createTextures();
     void createMipmaps(VkImage image, uint32_t mipLevels, glm::uvec2 imageSize);
-    void createCommonDescriptorSetLayout();
-    void createMaterialDescriptorSetLayout();
-    void createTexturesDescriptorSetLayout();
-    void createPipeline();
-    void createDescriptorPool();
-    void allocateCommonDescriptorSets();
-    void allocateMaterialIndexDescriptorSets();
-    void allocateTextureDescriptorSets();
-    void createCommonUniformBuffer();
     void createVertexAndIndexBuffer();
+    void createDescriptorPool();
+    void createAndAllocateCommonDescriptorSetLayout();
+    void createAndAllocateMaterialIndexDescriptorSetLayout();
+    void createAndAllocateTexturesDescriptorSetLayout();
+    void createPipeline();
+    void createCommonBuffer();
+    void createMaterialIndexBuffer();
     void allocateCommandBuffers();
     void createBLAS();
     void createTLAS();
     void updateCommonDescriptorSets();
-    void updateMaterialDescriptorSet();
+    void updateMaterialIndexDescriptorSet();
     void updateTexturesDescriptorSets();
     void createShaderBindingTable();
 
@@ -73,21 +70,25 @@ private:
     VkDeviceMemory m_imageMemory;
     std::vector<VkImageView> m_imageViews;
     VkDescriptorSetLayout m_commonDescriptorSetLayout;
-    VkDescriptorSetLayout m_materialDescriptorSetLayout;
+    VkDescriptorSetLayout m_materialIndexDescriptorSetLayout;
     VkDescriptorSetLayout m_texturesDescriptorSetLayout;
     VkPipelineLayout m_pipelineLayout;
     VkPipeline m_pipeline;
     VkDescriptorPool m_descriptorPool;
     VkDescriptorSet m_commonDescriptorSet;
+    VkDescriptorSet m_materialIndexDescriptorSet;
     std::vector<VkDescriptorSet> m_texturesDescriptorSets;
-    VkBuffer m_commonUniformBuffer;
-    VkDeviceMemory m_commonUniformBufferMemory;
     VkBuffer m_vertexBuffer;
     VkDeviceMemory m_vertexBufferMemory;
     VkBuffer m_indexBuffer;
     VkDeviceMemory m_indexBufferMemory;
+    size_t m_triangleCount;
     size_t m_vertexDataSize;
     size_t m_indexDataSize;
+    VkBuffer m_commonBuffer;
+    VkDeviceMemory m_commonBufferMemory;
+    VkBuffer m_materialIndexBuffer;
+    VkDeviceMemory m_materialIndexBufferMemory;
 
     VkBuffer m_blasBuffer;
     VkDeviceMemory m_blasMemory;

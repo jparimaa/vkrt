@@ -47,24 +47,23 @@ Raytracer::Raytracer(Context& context) :
     createSwapchainImageViews();
     createSampler();
     //createTextures();
-    createCommonDescriptorSetLayout();
-    createMaterialDescriptorSetLayout();
-    createTexturesDescriptorSetLayout();
-    createPipeline();
-    createDescriptorPool();
-    allocateCommonDescriptorSets();
-    //allocateMaterialIndexDescriptorSets();
-    //allocateTextureDescriptorSets();
-    createCommonUniformBuffer();
     createVertexAndIndexBuffer();
+    createDescriptorPool();
+    createCommonDescriptorSetLayoutAndAllocate();
+    createMaterialIndexDescriptorSetLayoutAndAllocate();
+    createTexturesDescriptorSetLayoutAndAllocate();
+    createPipeline();
+    createCommonBuffer();
+    createMaterialIndexBuffer();
     allocateCommandBuffers();
     createBLAS();
     createTLAS();
     updateCommonDescriptorSets();
-    //updateMaterialDescriptorSet();
+    updateMaterialIndexDescriptorSet();
     //updateTexturesDescriptorSets();
     createShaderBindingTable();
-    releaseModel();
+
+    m_model.reset();
 }
 
 Raytracer::~Raytracer()
@@ -73,7 +72,8 @@ Raytracer::~Raytracer()
 
     destroyBufferAndFreeMemory(m_device, m_vertexBuffer, m_vertexBufferMemory);
     destroyBufferAndFreeMemory(m_device, m_indexBuffer, m_indexBufferMemory);
-    destroyBufferAndFreeMemory(m_device, m_commonUniformBuffer, m_commonUniformBufferMemory);
+    destroyBufferAndFreeMemory(m_device, m_commonBuffer, m_commonBufferMemory);
+    destroyBufferAndFreeMemory(m_device, m_materialIndexBuffer, m_materialIndexBufferMemory);
     destroyBufferAndFreeMemory(m_device, m_tlasBuffer, m_tlasMemory);
     destroyBufferAndFreeMemory(m_device, m_blasBuffer, m_blasMemory);
     destroyBufferAndFreeMemory(m_device, m_blasGeometryInstanceBuffer, m_blasGeometryInstanceMemory);
@@ -85,7 +85,7 @@ Raytracer::~Raytracer()
     vkDestroyDescriptorPool(m_device, m_descriptorPool, nullptr);
     vkDestroyPipeline(m_device, m_pipeline, nullptr);
     vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
-    vkDestroyDescriptorSetLayout(m_device, m_materialDescriptorSetLayout, nullptr);
+    vkDestroyDescriptorSetLayout(m_device, m_materialIndexDescriptorSetLayout, nullptr);
     vkDestroyDescriptorSetLayout(m_device, m_commonDescriptorSetLayout, nullptr);
 
     vkDestroySampler(m_device, m_sampler, nullptr);
@@ -134,7 +134,7 @@ bool Raytracer::render()
         DebugMarker::beginLabel(cb, "Render", DebugMarker::blue);
         vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_pipeline);
 
-        const std::vector<VkDescriptorSet> descriptorSets{m_commonDescriptorSet /*, m_texturesDescriptorSets[primitiveInfo.material]*/};
+        const std::vector<VkDescriptorSet> descriptorSets{m_commonDescriptorSet, m_materialIndexDescriptorSet /*, m_texturesDescriptorSets[primitiveInfo.material]*/};
         vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_pipelineLayout, 0, ui32Size(descriptorSets), descriptorSets.data(), 0, nullptr);
 
         m_pvkCmdTraceRaysKHR(cb, &m_rgenShaderBindingTable, &m_rmissShaderBindingTable, &m_rchitShaderBindingTable, &m_callableShaderBindingTable, c_windowWidth, c_windowHeight, 1);
@@ -199,7 +199,7 @@ bool Raytracer::update(uint32_t imageIndex)
     updateCamera(deltaTime);
 
     void* dst;
-    VK_CHECK(vkMapMemory(m_device, m_commonUniformBufferMemory, imageIndex * c_uniformBufferSize, c_uniformBufferSize, 0, &dst));
+    VK_CHECK(vkMapMemory(m_device, m_commonBufferMemory, imageIndex * c_uniformBufferSize, c_uniformBufferSize, 0, &dst));
 
     UniformBufferInfo uniformBufferInfo{};
     uniformBufferInfo.forward = toVec4(m_camera.getForward(), 0.0f);
@@ -212,7 +212,7 @@ bool Raytracer::update(uint32_t imageIndex)
     uniformBufferInfo.viewInverse = glm::inverse(m_camera.getViewMatrix());
 
     std::memcpy(dst, &uniformBufferInfo, static_cast<size_t>(c_uniformBufferSize));
-    vkUnmapMemory(m_device, m_commonUniformBufferMemory);
+    vkUnmapMemory(m_device, m_commonBufferMemory);
 
     return true;
 }
@@ -242,11 +242,6 @@ void Raytracer::getFunctionPointers()
 void Raytracer::loadModel()
 {
     m_model.reset(new Model("sponza/Sponza.gltf"));
-}
-
-void Raytracer::releaseModel()
-{
-    m_model.reset();
 }
 
 void Raytracer::setupCamera()
@@ -624,7 +619,109 @@ void Raytracer::createMipmaps(VkImage image, uint32_t mipLevels, glm::uvec2 imag
     endSingleTimeCommands(m_context.getGraphicsQueue(), command);
 }
 
-void Raytracer::createCommonDescriptorSetLayout()
+void Raytracer::createVertexAndIndexBuffer()
+{
+    m_vertexDataSize = m_model->vertexBufferSizeInBytes;
+    m_indexDataSize = m_model->indexBufferSizeInBytes;
+    std::vector<uint8_t> vertexData(m_vertexDataSize, 0);
+    std::vector<uint8_t> indexData(m_indexDataSize, 0);
+
+    const int indexCount = m_indexDataSize / sizeof(Model::Index);
+    std::vector<Model::Index> indices(indexCount);
+    int indexCounter = 0;
+    Model::Index indexOffset = 0;
+    size_t vertexOffset = 0;
+    for (const Model::Primitive& primitive : m_model->primitives)
+    {
+        for (Model::Index index : primitive.indices)
+        {
+            indices[indexCounter] = indexOffset + index;
+            ++indexCounter;
+        }
+        indexOffset += primitive.vertices.size();
+
+        const size_t vertexSize = sizeof(Model::Vertex) * primitive.vertices.size();
+        std::memcpy(&vertexData[vertexOffset], primitive.vertices.data(), vertexSize);
+        vertexOffset += vertexSize;
+    }
+
+    CHECK(m_indexDataSize == (sizeof(Model::Index) * indices.size()));
+    std::memcpy(&indexData[0], indices.data(), m_indexDataSize);
+
+    m_triangleCount = indices.size() / 3;
+
+    const VkPhysicalDevice physicalDevice = m_context.getPhysicalDevice();
+    const VkBufferUsageFlags usage = //
+        VK_BUFFER_USAGE_TRANSFER_DST_BIT | //
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | //
+        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | //
+        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+
+    VkBufferCopy copyRegion{};
+    copyRegion.srcOffset = 0;
+    copyRegion.dstOffset = 0;
+
+    { // Vertex
+        StagingBuffer stagingBuffer = createStagingBuffer(m_device, physicalDevice, vertexData.data(), m_vertexDataSize);
+
+        m_vertexBuffer = createBuffer(m_device, m_vertexDataSize, usage);
+        m_vertexBufferMemory = allocateAndBindMemory(m_device, physicalDevice, m_vertexBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        DebugMarker::setObjectName(VK_OBJECT_TYPE_BUFFER, m_vertexBuffer, "Buffer - Vertex");
+        DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_vertexBufferMemory, "Memory - Vertex buffer");
+
+        copyRegion.size = m_vertexDataSize;
+
+        const SingleTimeCommand command = beginSingleTimeCommands(m_context.getGraphicsCommandPool(), m_device);
+        vkCmdCopyBuffer(command.commandBuffer, stagingBuffer.buffer, m_vertexBuffer, 1, &copyRegion);
+        endSingleTimeCommands(m_context.getGraphicsQueue(), command);
+
+        releaseStagingBuffer(m_device, stagingBuffer);
+    }
+    { // Index
+        StagingBuffer stagingBuffer = createStagingBuffer(m_device, physicalDevice, indexData.data(), m_indexDataSize);
+
+        m_indexBuffer = createBuffer(m_device, m_indexDataSize, usage);
+        m_indexBufferMemory = allocateAndBindMemory(m_device, physicalDevice, m_indexBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        DebugMarker::setObjectName(VK_OBJECT_TYPE_BUFFER, m_indexBuffer, "Buffer - Index");
+        DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_indexBufferMemory, "Memory - Index buffer");
+
+        copyRegion.size = m_indexDataSize;
+
+        const SingleTimeCommand command = beginSingleTimeCommands(m_context.getGraphicsCommandPool(), m_device);
+        vkCmdCopyBuffer(command.commandBuffer, stagingBuffer.buffer, m_indexBuffer, 1, &copyRegion);
+        endSingleTimeCommands(m_context.getGraphicsQueue(), command);
+
+        releaseStagingBuffer(m_device, stagingBuffer);
+    }
+}
+
+void Raytracer::createDescriptorPool()
+{
+    std::array<VkDescriptorPoolSize, 5> poolSizes{};
+    poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    poolSizes[0].descriptorCount = ui32Size(m_context.getSwapchainImages());
+    poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    poolSizes[1].descriptorCount = ui32Size(m_model->materials);
+    poolSizes[2].type = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    poolSizes[2].descriptorCount = 1;
+    poolSizes[3].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    poolSizes[3].descriptorCount = 1;
+    poolSizes[4].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    poolSizes[4].descriptorCount = 1;
+
+    const uint32_t maxSets = ui32Size(m_model->materials) + 64;
+
+    VkDescriptorPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.poolSizeCount = ui32Size(poolSizes);
+    poolInfo.pPoolSizes = poolSizes.data();
+    poolInfo.maxSets = maxSets;
+
+    VK_CHECK(vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_descriptorPool));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_POOL, m_descriptorPool, "Descriptor pool - Raytracer");
+}
+
+void Raytracer::createCommonDescriptorSetLayoutAndAllocate()
 {
     std::vector<VkDescriptorSetLayoutBinding> bindings(5);
     bindings[0].binding = 0;
@@ -660,9 +757,21 @@ void Raytracer::createCommonDescriptorSetLayout()
 
     VK_CHECK(vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_commonDescriptorSetLayout));
     DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, m_commonDescriptorSetLayout, "Desc set layout - Common");
+
+    const std::vector<VkDescriptorSetLayout> layouts{m_commonDescriptorSetLayout};
+
+    VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
+    descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    descriptorSetAllocateInfo.pNext = NULL;
+    descriptorSetAllocateInfo.descriptorPool = m_descriptorPool;
+    descriptorSetAllocateInfo.descriptorSetCount = ui32Size(layouts);
+    descriptorSetAllocateInfo.pSetLayouts = layouts.data();
+
+    VK_CHECK(vkAllocateDescriptorSets(m_device, &descriptorSetAllocateInfo, &m_commonDescriptorSet));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET, m_commonDescriptorSet, "Desc set - Common");
 }
 
-void Raytracer::createMaterialDescriptorSetLayout()
+void Raytracer::createMaterialIndexDescriptorSetLayoutAndAllocate()
 {
     std::vector<VkDescriptorSetLayoutBinding> bindings(1);
     bindings[0].binding = 0;
@@ -676,11 +785,23 @@ void Raytracer::createMaterialDescriptorSetLayout()
     layoutInfo.bindingCount = ui32Size(bindings);
     layoutInfo.pBindings = bindings.data();
 
-    VK_CHECK(vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_materialDescriptorSetLayout));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, m_materialDescriptorSetLayout, "Desc set layout - Material Index");
+    VK_CHECK(vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_materialIndexDescriptorSetLayout));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, m_materialIndexDescriptorSetLayout, "Desc set layout - Material Index");
+
+    const std::vector<VkDescriptorSetLayout> layouts{m_materialIndexDescriptorSetLayout};
+
+    VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
+    descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    descriptorSetAllocateInfo.pNext = NULL;
+    descriptorSetAllocateInfo.descriptorPool = m_descriptorPool;
+    descriptorSetAllocateInfo.descriptorSetCount = ui32Size(layouts);
+    descriptorSetAllocateInfo.pSetLayouts = layouts.data();
+
+    VK_CHECK(vkAllocateDescriptorSets(m_device, &descriptorSetAllocateInfo, &m_materialIndexDescriptorSet));
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET, m_materialIndexDescriptorSet, "Desc set - Material index");
 }
 
-void Raytracer::createTexturesDescriptorSetLayout()
+void Raytracer::createTexturesDescriptorSetLayoutAndAllocate()
 {
     /*
     const uint32_t imageCount = 3;
@@ -702,12 +823,28 @@ void Raytracer::createTexturesDescriptorSetLayout()
 
     VK_CHECK(vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_texturesDescriptorSetLayout));
     DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, m_texturesDescriptorSetLayout, "Desc set layout - Texture");
+
+        const size_t materialCount = m_model->materials.size();
+    m_texturesDescriptorSets.resize(materialCount);
+    std::vector<VkDescriptorSetLayout> layouts(materialCount, m_texturesDescriptorSetLayout);
+
+    VkDescriptorSetAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.descriptorPool = m_descriptorPool;
+    allocInfo.descriptorSetCount = ui32Size(layouts);
+    allocInfo.pSetLayouts = layouts.data();
+    VK_ERROR_FRAGMENTED_POOL;
+    VK_CHECK(vkAllocateDescriptorSets(m_device, &allocInfo, m_texturesDescriptorSets.data()));
+    for (size_t i = 0; i < m_texturesDescriptorSets.size(); ++i)
+    {
+        DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET, m_texturesDescriptorSets[i], "Desc set - Texture " + std::to_string(i));
+    }
     */
 }
 
 void Raytracer::createPipeline()
 {
-    const std::vector<VkDescriptorSetLayout> descriptorSetLayouts{m_commonDescriptorSetLayout /*, m_materialDescriptorSetLayout, m_texturesDescriptorSetLayout*/};
+    const std::vector<VkDescriptorSetLayout> descriptorSetLayouts{m_commonDescriptorSetLayout, m_materialIndexDescriptorSetLayout /*, m_texturesDescriptorSetLayout*/};
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = ui32Size(descriptorSetLayouts);
@@ -812,158 +949,24 @@ void Raytracer::createPipeline()
     vkDestroyShaderModule(m_device, shadowMissShaderModule, nullptr);
 }
 
-void Raytracer::createDescriptorPool()
-{
-    const uint32_t swapchainLength = static_cast<uint32_t>(m_context.getSwapchainImages().size());
-    const uint32_t numSetsForGUI = 1;
-    const uint32_t numSetsForModel = 0; //ui32Size(m_model->materials);
-
-    const uint32_t imageDescriptorCount = numSetsForModel + numSetsForGUI;
-
-    std::array<VkDescriptorPoolSize, 4> poolSizes{};
-    poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-    poolSizes[0].descriptorCount = swapchainLength;
-    poolSizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    poolSizes[1].descriptorCount = imageDescriptorCount;
-    poolSizes[2].type = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
-    poolSizes[2].descriptorCount = 1;
-    poolSizes[3].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-    poolSizes[3].descriptorCount = 1;
-
-    const uint32_t maxSets = swapchainLength + numSetsForModel + numSetsForGUI;
-
-    VkDescriptorPoolCreateInfo poolInfo{};
-    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-    poolInfo.poolSizeCount = ui32Size(poolSizes);
-    poolInfo.pPoolSizes = poolSizes.data();
-    poolInfo.maxSets = maxSets;
-
-    VK_CHECK(vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_descriptorPool));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_POOL, m_descriptorPool, "Descriptor pool - Raytracer");
-}
-
-void Raytracer::allocateCommonDescriptorSets()
-{
-    std::vector<VkDescriptorSetLayout> descriptorSetLayouts{m_commonDescriptorSetLayout};
-
-    VkDescriptorSetAllocateInfo descriptorSetAllocateInfo{};
-    descriptorSetAllocateInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    descriptorSetAllocateInfo.pNext = NULL;
-    descriptorSetAllocateInfo.descriptorPool = m_descriptorPool;
-    descriptorSetAllocateInfo.descriptorSetCount = ui32Size(descriptorSetLayouts);
-    descriptorSetAllocateInfo.pSetLayouts = descriptorSetLayouts.data();
-
-    VK_CHECK(vkAllocateDescriptorSets(m_device, &descriptorSetAllocateInfo, &m_commonDescriptorSet));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET, m_commonDescriptorSet, "Desc set - Common");
-}
-
-void Raytracer::allocateMaterialIndexDescriptorSets()
-{
-}
-
-void Raytracer::allocateTextureDescriptorSets()
-{
-    /*
-    const size_t materialCount = m_model->materials.size();
-    m_texturesDescriptorSets.resize(materialCount);
-    std::vector<VkDescriptorSetLayout> layouts(materialCount, m_texturesDescriptorSetLayout);
-
-    VkDescriptorSetAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = m_descriptorPool;
-    allocInfo.descriptorSetCount = ui32Size(layouts);
-    allocInfo.pSetLayouts = layouts.data();
-    VK_ERROR_FRAGMENTED_POOL;
-    VK_CHECK(vkAllocateDescriptorSets(m_device, &allocInfo, m_texturesDescriptorSets.data()));
-    for (size_t i = 0; i < m_texturesDescriptorSets.size(); ++i)
-    {
-        DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET, m_texturesDescriptorSets[i], "Desc set - Texture " + std::to_string(i));
-    }
-    */
-}
-
-void Raytracer::createCommonUniformBuffer()
+void Raytracer::createCommonBuffer()
 {
     const uint64_t bufferSize = c_uniformBufferSize * m_context.getSwapchainImages().size();
 
-    m_commonUniformBuffer = createBuffer(m_device, bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
-    m_commonUniformBufferMemory = allocateAndBindMemory(m_device, m_context.getPhysicalDevice(), m_commonUniformBuffer, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_BUFFER, m_commonUniformBuffer, "Buffer - Common uniform buffer");
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_commonUniformBufferMemory, "Memory - Common uniform buffer");
+    m_commonBuffer = createBuffer(m_device, bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+    m_commonBufferMemory = allocateAndBindMemory(m_device, m_context.getPhysicalDevice(), m_commonBuffer, VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_BUFFER, m_commonBuffer, "Buffer - Common uniform buffer");
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_commonBufferMemory, "Memory - Common uniform memory");
 }
 
-void Raytracer::createVertexAndIndexBuffer()
+void Raytracer::createMaterialIndexBuffer()
 {
-    m_vertexDataSize = m_model->vertexBufferSizeInBytes;
-    m_indexDataSize = m_model->indexBufferSizeInBytes;
-    std::vector<uint8_t> vertexData(m_vertexDataSize, 0);
-    std::vector<uint8_t> indexData(m_indexDataSize, 0);
+    const uint64_t bufferSize = sizeof(uint32_t) * m_triangleCount;
 
-    const int indexCount = m_indexDataSize / sizeof(Model::Index);
-    std::vector<Model::Index> indices(indexCount);
-    int indexCounter = 0;
-    Model::Index indexOffset = 0;
-    size_t vertexOffset = 0;
-    for (const Model::Primitive& primitive : m_model->primitives)
-    {
-        for (Model::Index index : primitive.indices)
-        {
-            indices[indexCounter] = indexOffset + index;
-            ++indexCounter;
-        }
-        indexOffset += primitive.vertices.size();
-
-        const size_t vertexSize = sizeof(Model::Vertex) * primitive.vertices.size();
-        std::memcpy(&vertexData[vertexOffset], primitive.vertices.data(), vertexSize);
-        vertexOffset += vertexSize;
-    }
-
-    CHECK(m_indexDataSize == (sizeof(Model::Index) * indices.size()));
-    std::memcpy(&indexData[0], indices.data(), m_indexDataSize);
-
-    const VkPhysicalDevice physicalDevice = m_context.getPhysicalDevice();
-    const VkBufferUsageFlags usage = //
-        VK_BUFFER_USAGE_TRANSFER_DST_BIT | //
-        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | //
-        VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR | //
-        VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
-
-    VkBufferCopy copyRegion{};
-    copyRegion.srcOffset = 0;
-    copyRegion.dstOffset = 0;
-
-    { // Vertex
-        StagingBuffer stagingBuffer = createStagingBuffer(m_device, physicalDevice, vertexData.data(), m_vertexDataSize);
-
-        m_vertexBuffer = createBuffer(m_device, m_vertexDataSize, usage);
-        m_vertexBufferMemory = allocateAndBindMemory(m_device, physicalDevice, m_vertexBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        DebugMarker::setObjectName(VK_OBJECT_TYPE_BUFFER, m_vertexBuffer, "Buffer - Vertex");
-        DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_vertexBufferMemory, "Memory - Vertex buffer");
-
-        copyRegion.size = m_vertexDataSize;
-
-        const SingleTimeCommand command = beginSingleTimeCommands(m_context.getGraphicsCommandPool(), m_device);
-        vkCmdCopyBuffer(command.commandBuffer, stagingBuffer.buffer, m_vertexBuffer, 1, &copyRegion);
-        endSingleTimeCommands(m_context.getGraphicsQueue(), command);
-
-        releaseStagingBuffer(m_device, stagingBuffer);
-    }
-    { // Index
-        StagingBuffer stagingBuffer = createStagingBuffer(m_device, physicalDevice, indexData.data(), m_indexDataSize);
-
-        m_indexBuffer = createBuffer(m_device, m_indexDataSize, usage);
-        m_indexBufferMemory = allocateAndBindMemory(m_device, physicalDevice, m_indexBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        DebugMarker::setObjectName(VK_OBJECT_TYPE_BUFFER, m_indexBuffer, "Buffer - Index");
-        DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_indexBufferMemory, "Memory - Index buffer");
-
-        copyRegion.size = m_indexDataSize;
-
-        const SingleTimeCommand command = beginSingleTimeCommands(m_context.getGraphicsCommandPool(), m_device);
-        vkCmdCopyBuffer(command.commandBuffer, stagingBuffer.buffer, m_indexBuffer, 1, &copyRegion);
-        endSingleTimeCommands(m_context.getGraphicsQueue(), command);
-
-        releaseStagingBuffer(m_device, stagingBuffer);
-    }
+    m_materialIndexBuffer = createBuffer(m_device, bufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
+    m_materialIndexBufferMemory = allocateAndBindMemory(m_device, m_context.getPhysicalDevice(), m_materialIndexBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_BUFFER, m_materialIndexBuffer, "Buffer - Material index buffer");
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_materialIndexBufferMemory, "Memory - Material index memory");
 }
 
 void Raytracer::allocateCommandBuffers()
@@ -1234,7 +1237,7 @@ void Raytracer::updateCommonDescriptorSets()
     accelerationStructureDescriptorInfo.pAccelerationStructures = &m_tlas;
 
     VkDescriptorBufferInfo uniformDescriptorInfo{};
-    uniformDescriptorInfo.buffer = m_commonUniformBuffer;
+    uniformDescriptorInfo.buffer = m_commonBuffer;
     uniformDescriptorInfo.offset = 0;
     uniformDescriptorInfo.range = VK_WHOLE_SIZE;
 
@@ -1325,8 +1328,55 @@ void Raytracer::updateCommonDescriptorSets()
     vkUpdateDescriptorSets(m_device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
 }
 
-void Raytracer::updateMaterialDescriptorSet()
+void Raytracer::updateMaterialIndexDescriptorSet()
 {
+    VkDescriptorBufferInfo bufferInfo{};
+    bufferInfo.buffer = m_materialIndexBuffer;
+    bufferInfo.offset = 0;
+    bufferInfo.range = VK_WHOLE_SIZE;
+
+    VkWriteDescriptorSet writeIndexBuffer{};
+    writeIndexBuffer.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    writeIndexBuffer.pNext = NULL;
+    writeIndexBuffer.dstSet = m_materialIndexDescriptorSet;
+    writeIndexBuffer.dstBinding = 0;
+    writeIndexBuffer.dstArrayElement = 0;
+    writeIndexBuffer.descriptorCount = 1;
+    writeIndexBuffer.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    writeIndexBuffer.pImageInfo = NULL;
+    writeIndexBuffer.pBufferInfo = &bufferInfo;
+    writeIndexBuffer.pTexelBufferView = NULL;
+
+    std::vector<VkWriteDescriptorSet> writeDescriptorSets{writeIndexBuffer};
+
+    vkUpdateDescriptorSets(m_device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
+
+    // Copy data
+    std::vector<uint32_t> materialIndices(m_triangleCount, 0);
+    size_t counter = 0;
+    for (const Model::Primitive& primitive : m_model->primitives)
+    {
+        for (size_t i = 0; i < primitive.indices.size() / 3; ++i)
+        {
+            materialIndices[counter] = static_cast<uint32_t>(m_model->materials[primitive.material].baseColor);
+            ++counter;
+        }
+    }
+    CHECK(counter == materialIndices.size());
+
+    VkBufferCopy copyRegion{};
+    copyRegion.srcOffset = 0;
+    copyRegion.dstOffset = 0;
+    copyRegion.size = materialIndices.size() * sizeof(materialIndices[0]);
+
+    const VkPhysicalDevice physicalDevice = m_context.getPhysicalDevice();
+    StagingBuffer stagingBuffer = createStagingBuffer(m_device, physicalDevice, materialIndices.data(), copyRegion.size);
+
+    const SingleTimeCommand command = beginSingleTimeCommands(m_context.getGraphicsCommandPool(), m_device);
+    vkCmdCopyBuffer(command.commandBuffer, stagingBuffer.buffer, m_materialIndexBuffer, 1, &copyRegion);
+    endSingleTimeCommands(m_context.getGraphicsQueue(), command);
+
+    releaseStagingBuffer(m_device, stagingBuffer);
 }
 
 void Raytracer::updateTexturesDescriptorSets()

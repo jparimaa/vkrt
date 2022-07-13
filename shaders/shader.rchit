@@ -34,9 +34,9 @@ indexBuffer;
 layout(binding = 3, set = 0) buffer VertexBuffer { float data[]; }
 vertexBuffer;
 
-/*
 layout(binding = 0, set = 1) buffer MaterialIndexBuffer { uint data[]; }
 materialIndexBuffer;
+/*
 layout(binding = 1, set = 1) buffer MaterialBuffer { Material data[]; }
 materialBuffer;
 */
