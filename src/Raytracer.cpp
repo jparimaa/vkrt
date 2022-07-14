@@ -20,12 +20,28 @@ struct UniformBufferInfo
     glm::vec4 right;
     glm::vec4 up;
     glm::vec4 forward;
+    std::array<glm::vec4, 4> lightPositions;
+};
 
-    uint64_t frameCount;
+const std::array<glm::vec4, 4> c_lightPositions{
+    glm::vec4{6.0f, 4.0f, 0.0f, 0.0f}, //
+    glm::vec4{2.0f, 4.0f, 0.0f, 0.0f}, //
+    glm::vec4{-2.0f, 4.0f, 0.0f, 0.0f}, //
+    glm::vec4{-6.0f, 4.0f, 0.0f, 0.0f} //
+};
+
+struct MaterialInfo
+{
+    int baseColorTextureIndex;
+    int metallicRoughnessTextureIndex;
+    int normalTextureIndex;
+    float reflectiveness;
 };
 
 const size_t c_uniformBufferSize = sizeof(UniformBufferInfo);
 const VkImageSubresourceRange c_defaultSubresourceRance{VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+const uint32_t c_shaderCount = 4;
+const uint32_t c_shaderGroupCount = 4;
 
 VkMemoryAllocateFlagsInfo c_memoryAllocateFlagsInfo{
     VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO, //
@@ -209,10 +225,10 @@ bool Raytracer::update(uint32_t imageIndex)
     uniformBufferInfo.right = toVec4(-m_camera.getLeft(), 0.0f);
     uniformBufferInfo.up = toVec4(m_camera.getUp(), 0.0f);
     uniformBufferInfo.position = toVec4(m_camera.getPosition(), 1.0f);
-    uniformBufferInfo.frameCount = 0;
 
     uniformBufferInfo.projInverse = glm::inverse(m_camera.getProjectionMatrix());
     uniformBufferInfo.viewInverse = glm::inverse(m_camera.getViewMatrix());
+    uniformBufferInfo.lightPositions = c_lightPositions;
 
     std::memcpy(dst, &uniformBufferInfo, static_cast<size_t>(c_uniformBufferSize));
     vkUnmapMemory(m_device, m_commonBufferMemory);
@@ -886,81 +902,81 @@ void Raytracer::createPipeline()
     VkShaderModule missShaderModule = createShaderModule(m_device, currentPath / "shader.rmiss.spv");
     VkShaderModule shadowMissShaderModule = createShaderModule(m_device, currentPath / "shader_shadow.rmiss.spv");
 
-    std::vector<VkPipelineShaderStageCreateInfo> pipelineShaderStageCreateInfoList(4);
+    std::array<VkPipelineShaderStageCreateInfo, c_shaderCount> shaderStageCreateInfoList;
 
-    pipelineShaderStageCreateInfoList[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    pipelineShaderStageCreateInfoList[0].pNext = NULL;
-    pipelineShaderStageCreateInfoList[0].flags = 0;
-    pipelineShaderStageCreateInfoList[0].stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
-    pipelineShaderStageCreateInfoList[0].module = closesHitShaderModule;
-    pipelineShaderStageCreateInfoList[0].pName = "main";
-    pipelineShaderStageCreateInfoList[0].pSpecializationInfo = NULL;
-    pipelineShaderStageCreateInfoList[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    pipelineShaderStageCreateInfoList[1].pNext = NULL;
-    pipelineShaderStageCreateInfoList[1].flags = 0;
-    pipelineShaderStageCreateInfoList[1].stage = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
-    pipelineShaderStageCreateInfoList[1].module = rayGenShaderModule;
-    pipelineShaderStageCreateInfoList[1].pName = "main";
-    pipelineShaderStageCreateInfoList[1].pSpecializationInfo = NULL;
-    pipelineShaderStageCreateInfoList[2].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    pipelineShaderStageCreateInfoList[2].pNext = NULL;
-    pipelineShaderStageCreateInfoList[2].flags = 0;
-    pipelineShaderStageCreateInfoList[2].stage = VK_SHADER_STAGE_MISS_BIT_KHR;
-    pipelineShaderStageCreateInfoList[2].module = missShaderModule;
-    pipelineShaderStageCreateInfoList[2].pName = "main";
-    pipelineShaderStageCreateInfoList[2].pSpecializationInfo = NULL;
-    pipelineShaderStageCreateInfoList[3].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    pipelineShaderStageCreateInfoList[3].pNext = NULL;
-    pipelineShaderStageCreateInfoList[3].flags = 0;
-    pipelineShaderStageCreateInfoList[3].stage = VK_SHADER_STAGE_MISS_BIT_KHR;
-    pipelineShaderStageCreateInfoList[3].module = shadowMissShaderModule;
-    pipelineShaderStageCreateInfoList[3].pName = "main";
-    pipelineShaderStageCreateInfoList[3].pSpecializationInfo = NULL;
+    shaderStageCreateInfoList[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    shaderStageCreateInfoList[0].pNext = NULL;
+    shaderStageCreateInfoList[0].flags = 0;
+    shaderStageCreateInfoList[0].stage = VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR;
+    shaderStageCreateInfoList[0].module = closesHitShaderModule;
+    shaderStageCreateInfoList[0].pName = "main";
+    shaderStageCreateInfoList[0].pSpecializationInfo = NULL;
+    shaderStageCreateInfoList[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    shaderStageCreateInfoList[1].pNext = NULL;
+    shaderStageCreateInfoList[1].flags = 0;
+    shaderStageCreateInfoList[1].stage = VK_SHADER_STAGE_RAYGEN_BIT_KHR;
+    shaderStageCreateInfoList[1].module = rayGenShaderModule;
+    shaderStageCreateInfoList[1].pName = "main";
+    shaderStageCreateInfoList[1].pSpecializationInfo = NULL;
+    shaderStageCreateInfoList[2].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    shaderStageCreateInfoList[2].pNext = NULL;
+    shaderStageCreateInfoList[2].flags = 0;
+    shaderStageCreateInfoList[2].stage = VK_SHADER_STAGE_MISS_BIT_KHR;
+    shaderStageCreateInfoList[2].module = missShaderModule;
+    shaderStageCreateInfoList[2].pName = "main";
+    shaderStageCreateInfoList[2].pSpecializationInfo = NULL;
+    shaderStageCreateInfoList[3].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    shaderStageCreateInfoList[3].pNext = NULL;
+    shaderStageCreateInfoList[3].flags = 0;
+    shaderStageCreateInfoList[3].stage = VK_SHADER_STAGE_MISS_BIT_KHR;
+    shaderStageCreateInfoList[3].module = shadowMissShaderModule;
+    shaderStageCreateInfoList[3].pName = "main";
+    shaderStageCreateInfoList[3].pSpecializationInfo = NULL;
 
-    std::vector<VkRayTracingShaderGroupCreateInfoKHR> rayTracingShaderGroupCreateInfoList(4);
+    std::array<VkRayTracingShaderGroupCreateInfoKHR, c_shaderGroupCount> shaderGroupCreateInfoList;
 
-    rayTracingShaderGroupCreateInfoList[0].sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
-    rayTracingShaderGroupCreateInfoList[0].pNext = NULL;
-    rayTracingShaderGroupCreateInfoList[0].type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
-    rayTracingShaderGroupCreateInfoList[0].generalShader = VK_SHADER_UNUSED_KHR;
-    rayTracingShaderGroupCreateInfoList[0].closestHitShader = 0;
-    rayTracingShaderGroupCreateInfoList[0].anyHitShader = VK_SHADER_UNUSED_KHR;
-    rayTracingShaderGroupCreateInfoList[0].intersectionShader = VK_SHADER_UNUSED_KHR;
-    rayTracingShaderGroupCreateInfoList[0].pShaderGroupCaptureReplayHandle = NULL;
-    rayTracingShaderGroupCreateInfoList[1].sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
-    rayTracingShaderGroupCreateInfoList[1].pNext = NULL;
-    rayTracingShaderGroupCreateInfoList[1].type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
-    rayTracingShaderGroupCreateInfoList[1].generalShader = 1;
-    rayTracingShaderGroupCreateInfoList[1].closestHitShader = VK_SHADER_UNUSED_KHR;
-    rayTracingShaderGroupCreateInfoList[1].anyHitShader = VK_SHADER_UNUSED_KHR;
-    rayTracingShaderGroupCreateInfoList[1].intersectionShader = VK_SHADER_UNUSED_KHR;
-    rayTracingShaderGroupCreateInfoList[1].pShaderGroupCaptureReplayHandle = NULL;
-    rayTracingShaderGroupCreateInfoList[2].sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
-    rayTracingShaderGroupCreateInfoList[2].pNext = NULL;
-    rayTracingShaderGroupCreateInfoList[2].type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
-    rayTracingShaderGroupCreateInfoList[2].generalShader = 2;
-    rayTracingShaderGroupCreateInfoList[2].closestHitShader = VK_SHADER_UNUSED_KHR;
-    rayTracingShaderGroupCreateInfoList[2].anyHitShader = VK_SHADER_UNUSED_KHR;
-    rayTracingShaderGroupCreateInfoList[2].intersectionShader = VK_SHADER_UNUSED_KHR;
-    rayTracingShaderGroupCreateInfoList[2].pShaderGroupCaptureReplayHandle = NULL;
-    rayTracingShaderGroupCreateInfoList[3].sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
-    rayTracingShaderGroupCreateInfoList[3].pNext = NULL;
-    rayTracingShaderGroupCreateInfoList[3].type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
-    rayTracingShaderGroupCreateInfoList[3].generalShader = 3;
-    rayTracingShaderGroupCreateInfoList[3].closestHitShader = VK_SHADER_UNUSED_KHR;
-    rayTracingShaderGroupCreateInfoList[3].anyHitShader = VK_SHADER_UNUSED_KHR;
-    rayTracingShaderGroupCreateInfoList[3].intersectionShader = VK_SHADER_UNUSED_KHR;
-    rayTracingShaderGroupCreateInfoList[3].pShaderGroupCaptureReplayHandle = NULL;
+    shaderGroupCreateInfoList[0].sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+    shaderGroupCreateInfoList[0].pNext = NULL;
+    shaderGroupCreateInfoList[0].type = VK_RAY_TRACING_SHADER_GROUP_TYPE_TRIANGLES_HIT_GROUP_KHR;
+    shaderGroupCreateInfoList[0].generalShader = VK_SHADER_UNUSED_KHR;
+    shaderGroupCreateInfoList[0].closestHitShader = 0;
+    shaderGroupCreateInfoList[0].anyHitShader = VK_SHADER_UNUSED_KHR;
+    shaderGroupCreateInfoList[0].intersectionShader = VK_SHADER_UNUSED_KHR;
+    shaderGroupCreateInfoList[0].pShaderGroupCaptureReplayHandle = NULL;
+    shaderGroupCreateInfoList[1].sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+    shaderGroupCreateInfoList[1].pNext = NULL;
+    shaderGroupCreateInfoList[1].type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+    shaderGroupCreateInfoList[1].generalShader = 1;
+    shaderGroupCreateInfoList[1].closestHitShader = VK_SHADER_UNUSED_KHR;
+    shaderGroupCreateInfoList[1].anyHitShader = VK_SHADER_UNUSED_KHR;
+    shaderGroupCreateInfoList[1].intersectionShader = VK_SHADER_UNUSED_KHR;
+    shaderGroupCreateInfoList[1].pShaderGroupCaptureReplayHandle = NULL;
+    shaderGroupCreateInfoList[2].sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+    shaderGroupCreateInfoList[2].pNext = NULL;
+    shaderGroupCreateInfoList[2].type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+    shaderGroupCreateInfoList[2].generalShader = 2;
+    shaderGroupCreateInfoList[2].closestHitShader = VK_SHADER_UNUSED_KHR;
+    shaderGroupCreateInfoList[2].anyHitShader = VK_SHADER_UNUSED_KHR;
+    shaderGroupCreateInfoList[2].intersectionShader = VK_SHADER_UNUSED_KHR;
+    shaderGroupCreateInfoList[2].pShaderGroupCaptureReplayHandle = NULL;
+    shaderGroupCreateInfoList[3].sType = VK_STRUCTURE_TYPE_RAY_TRACING_SHADER_GROUP_CREATE_INFO_KHR;
+    shaderGroupCreateInfoList[3].pNext = NULL;
+    shaderGroupCreateInfoList[3].type = VK_RAY_TRACING_SHADER_GROUP_TYPE_GENERAL_KHR;
+    shaderGroupCreateInfoList[3].generalShader = 3;
+    shaderGroupCreateInfoList[3].closestHitShader = VK_SHADER_UNUSED_KHR;
+    shaderGroupCreateInfoList[3].anyHitShader = VK_SHADER_UNUSED_KHR;
+    shaderGroupCreateInfoList[3].intersectionShader = VK_SHADER_UNUSED_KHR;
+    shaderGroupCreateInfoList[3].pShaderGroupCaptureReplayHandle = NULL;
 
     VkRayTracingPipelineCreateInfoKHR rayTracingPipelineCreateInfo{};
     rayTracingPipelineCreateInfo.sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR;
     rayTracingPipelineCreateInfo.pNext = NULL;
     rayTracingPipelineCreateInfo.flags = 0;
-    rayTracingPipelineCreateInfo.stageCount = 4;
-    rayTracingPipelineCreateInfo.pStages = pipelineShaderStageCreateInfoList.data();
-    rayTracingPipelineCreateInfo.groupCount = 4;
-    rayTracingPipelineCreateInfo.pGroups = rayTracingShaderGroupCreateInfoList.data();
-    rayTracingPipelineCreateInfo.maxPipelineRayRecursionDepth = 1;
+    rayTracingPipelineCreateInfo.stageCount = ui32Size(shaderStageCreateInfoList);
+    rayTracingPipelineCreateInfo.pStages = shaderStageCreateInfoList.data();
+    rayTracingPipelineCreateInfo.groupCount = ui32Size(shaderGroupCreateInfoList);
+    rayTracingPipelineCreateInfo.pGroups = shaderGroupCreateInfoList.data();
+    rayTracingPipelineCreateInfo.maxPipelineRayRecursionDepth = 2;
     rayTracingPipelineCreateInfo.pLibraryInfo = NULL;
     rayTracingPipelineCreateInfo.pLibraryInterface = NULL;
     rayTracingPipelineCreateInfo.pDynamicState = NULL;
@@ -988,7 +1004,7 @@ void Raytracer::createCommonBuffer()
 
 void Raytracer::createMaterialIndexBuffer()
 {
-    const uint64_t bufferSize = sizeof(uint32_t) * m_triangleCount;
+    const uint64_t bufferSize = sizeof(MaterialInfo) * m_triangleCount;
 
     m_materialIndexBuffer = createBuffer(m_device, bufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
     m_materialIndexBufferMemory = allocateAndBindMemory(m_device, m_context.getPhysicalDevice(), m_materialIndexBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
@@ -1379,13 +1395,16 @@ void Raytracer::updateMaterialIndexDescriptorSet()
     vkUpdateDescriptorSets(m_device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
 
     // Copy data
-    std::vector<uint32_t> materialIndices(m_triangleCount, 0);
+    std::vector<MaterialInfo> materialIndices(m_triangleCount);
     size_t counter = 0;
     for (const Model::Primitive& primitive : m_model->primitives)
     {
         for (size_t i = 0; i < primitive.indices.size() / 3; ++i)
         {
-            materialIndices[counter] = static_cast<uint32_t>(m_model->materials[primitive.material].baseColor);
+            materialIndices[counter].baseColorTextureIndex = m_model->materials[primitive.material].baseColor;
+            materialIndices[counter].normalTextureIndex = m_model->materials[primitive.material].normalImage;
+            materialIndices[counter].metallicRoughnessTextureIndex = m_model->materials[primitive.material].metallicRoughnessImage;
+            materialIndices[counter].reflectiveness = 0.3f;
             ++counter;
         }
     }
@@ -1450,22 +1469,23 @@ void Raytracer::createShaderBindingTable()
     vkGetPhysicalDeviceProperties2(physicalDevice, &physicalDeviceProperties2);
 
     const VkDeviceSize shaderGroupHandleSize = static_cast<VkDeviceSize>(physicalDeviceRayTracingPipelineProperties.shaderGroupHandleSize);
-    const VkDeviceSize shaderBindingTableSize = shaderGroupHandleSize * 4;
+    const VkDeviceSize shaderBindingTableSize = shaderGroupHandleSize * c_shaderGroupCount;
+    const uint32_t shaderGroupBaseAlignment = physicalDeviceRayTracingPipelineProperties.shaderGroupBaseAlignment;
 
     const VkBufferUsageFlags usage = VK_BUFFER_USAGE_SHADER_BINDING_TABLE_BIT_KHR | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
     m_shaderBindingTableBuffer = createBuffer(m_device, shaderBindingTableSize, usage);
     m_shaderBindingTableMemory = allocateAndBindMemory(m_device, physicalDevice, m_shaderBindingTableBuffer, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
 
-    std::vector<char> shaderHandleBuffer(shaderBindingTableSize, 0);
-    VK_CHECK(m_pvkGetRayTracingShaderGroupHandlesKHR(m_device, m_pipeline, 0, 4, shaderBindingTableSize, shaderHandleBuffer.data()));
+    std::vector<char> shaderGroupHandlesBuffer(shaderBindingTableSize, 0);
+    VK_CHECK(m_pvkGetRayTracingShaderGroupHandlesKHR(m_device, m_pipeline, 0, c_shaderGroupCount, shaderBindingTableSize, shaderGroupHandlesBuffer.data()));
 
-    void* mapped;
-    VK_CHECK(vkMapMemory(m_device, m_shaderBindingTableMemory, 0, shaderBindingTableSize, 0, &mapped));
+    void* sbtMemoryMapped;
+    VK_CHECK(vkMapMemory(m_device, m_shaderBindingTableMemory, 0, shaderBindingTableSize, 0, &sbtMemoryMapped));
 
-    for (uint32_t x = 0; x < 4; x++)
+    for (uint32_t i = 0; i < c_shaderGroupCount; ++i)
     {
-        memcpy(mapped, &shaderHandleBuffer[x * shaderGroupHandleSize], shaderGroupHandleSize);
-        mapped = (char*)mapped + physicalDeviceRayTracingPipelineProperties.shaderGroupBaseAlignment;
+        memcpy(sbtMemoryMapped, &shaderGroupHandlesBuffer[i * shaderGroupHandleSize], shaderGroupHandleSize);
+        sbtMemoryMapped = (char*)sbtMemoryMapped + shaderGroupBaseAlignment;
     }
 
     vkUnmapMemory(m_device, m_shaderBindingTableMemory);
@@ -1476,21 +1496,18 @@ void Raytracer::createShaderBindingTable()
     shaderBindingTableBufferDeviceAddressInfo.buffer = m_shaderBindingTableBuffer;
 
     const VkDeviceAddress shaderBindingTableBufferDeviceAddress = m_pvkGetBufferDeviceAddressKHR(m_device, &shaderBindingTableBufferDeviceAddressInfo);
-    const VkDeviceSize progSize = physicalDeviceRayTracingPipelineProperties.shaderGroupBaseAlignment;
-    const VkDeviceSize sbtSize = progSize * 4;
-    const VkDeviceSize hitGroupOffset = 0 * progSize;
-    const VkDeviceSize rayGenOffset = 1 * progSize;
-    const VkDeviceSize missOffset = 2 * progSize;
 
-    m_rchitShaderBindingTable.deviceAddress = shaderBindingTableBufferDeviceAddress + 0 * progSize;
-    m_rchitShaderBindingTable.stride = progSize;
-    m_rchitShaderBindingTable.size = sbtSize * 1;
+    const VkDeviceSize groupSize = c_shaderCount * shaderGroupBaseAlignment;
 
-    m_rgenShaderBindingTable.deviceAddress = shaderBindingTableBufferDeviceAddress + 1 * progSize;
-    m_rgenShaderBindingTable.stride = sbtSize;
-    m_rgenShaderBindingTable.size = sbtSize * 1;
+    m_rchitShaderBindingTable.deviceAddress = shaderBindingTableBufferDeviceAddress + 0 * shaderGroupBaseAlignment;
+    m_rchitShaderBindingTable.stride = shaderGroupBaseAlignment;
+    m_rchitShaderBindingTable.size = groupSize * 1;
 
-    m_rmissShaderBindingTable.deviceAddress = shaderBindingTableBufferDeviceAddress + 2 * progSize;
-    m_rmissShaderBindingTable.stride = progSize;
-    m_rmissShaderBindingTable.size = sbtSize * 2;
+    m_rgenShaderBindingTable.deviceAddress = shaderBindingTableBufferDeviceAddress + 1 * shaderGroupBaseAlignment;
+    m_rgenShaderBindingTable.stride = groupSize;
+    m_rgenShaderBindingTable.size = groupSize * 1;
+
+    m_rmissShaderBindingTable.deviceAddress = shaderBindingTableBufferDeviceAddress + 2 * shaderGroupBaseAlignment;
+    m_rmissShaderBindingTable.stride = shaderGroupBaseAlignment;
+    m_rmissShaderBindingTable.size = groupSize * 2;
 }

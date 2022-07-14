@@ -3,51 +3,62 @@
 
 #define M_PI 3.1415926535897932384626433832795
 
-layout(location = 0) rayPayloadEXT Payload {
-  vec3 rayOrigin;
-  vec3 rayDirection;
-  vec3 previousNormal;
+layout(location = 0) rayPayloadEXT Payload
+{
+    vec3 rayOrigin;
+    vec3 rayDirection;
+    vec3 previousNormal;
 
-  vec3 directColor;
-  vec3 indirectColor;
-  int rayDepth;
+    vec3 directColor;
+    vec3 indirectColor;
+    int rayDepth;
 
-  int rayActive;
+    int rayActive;
 }
 payload;
 
 layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
-layout(binding = 1, set = 0) uniform Camera {
-  mat4 viewInverse;
-  mat4 projInverse;
-  vec4 position;
-  vec4 right;
-  vec4 up;
-  vec4 forward;
-  uint frameCount;
+layout(binding = 1, set = 0) uniform CommonUniformBuffer
+{
+    mat4 viewInverse;
+    mat4 projInverse;
+    vec4 position;
+    vec4 right;
+    vec4 up;
+    vec4 forward;
+    vec4 lightPositions[4];
 }
-camera;
+commonBuffer;
 
 layout(binding = 4, set = 0, rgba32f) uniform image2D image;
 
 void main()
 {
-	const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
-	const vec2 inUV = pixelCenter/vec2(gl_LaunchSizeEXT.xy);
-	vec2 d = inUV * 2.0 - 1.0;
+    const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
+    const vec2 inUV = pixelCenter / vec2(gl_LaunchSizeEXT.xy);
+    const vec2 uvNorm = inUV * 2.0 - 1.0;
 
-	vec4 origin = camera.viewInverse * vec4(0,0,0,1);
-	vec4 target = camera.projInverse * vec4(d.x, d.y, 1, 1);
-	vec4 direction = camera.viewInverse*vec4(normalize(target.xyz), 0);
+    const vec4 origin = commonBuffer.viewInverse * vec4(0, 0, 0, 1);
+    const vec4 target = commonBuffer.projInverse * vec4(uvNorm.x, uvNorm.y, 1, 1);
+    const vec4 direction = commonBuffer.viewInverse * vec4(normalize(target.xyz), 0);
 
-	payload.rayActive = 1;
+    payload.rayActive = 1;
 
-	traceRayEXT(topLevelAS, gl_RayFlagsOpaqueEXT, 0xFF, 0, 0, 0,
-				origin.xyz, 0.001, direction.xyz, 10000.0, 0);
+    traceRayEXT(
+        topLevelAS, // TLAS
+        gl_RayFlagsOpaqueEXT, // ray flags
+        0xFF, // cull mask
+        0, // sbt offset
+        0, // sbt stride
+        0, // miss index
+        origin.xyz, // ray origin
+        0.001, // min range
+        direction.xyz, // ray direction
+        10000.0, // max range
+        0 // payload location
+    );
 
-	vec4 color = vec4(payload.directColor, 1.0);
+    vec4 color = vec4(payload.directColor, 1.0);
 
-	imageStore(image, ivec2(gl_LaunchIDEXT.xy), color);
+    imageStore(image, ivec2(gl_LaunchIDEXT.xy), color);
 }
-
-
