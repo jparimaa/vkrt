@@ -6,6 +6,7 @@ layout(location = 0) rayPayloadEXT Payload
     vec3 hitValue;
     int done;
     int depth;
+    float attenuation;
     vec3 rayOrigin;
     vec3 rayDir;
 }
@@ -41,6 +42,7 @@ void main()
     vec3 finalHitValue = vec3(0);
 
     payload.hitValue = vec3(0);
+    payload.attenuation = 1;
     payload.depth = 0;
     payload.done = 1;
 

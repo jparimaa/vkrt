@@ -10,6 +10,7 @@ layout(location = 0) rayPayloadInEXT Payload
     vec3 hitValue;
     int done;
     int depth;
+    float attenuation;
     vec3 rayOrigin;
     vec3 rayDir;
 }
@@ -80,8 +81,7 @@ void main()
     const vec3 worldPos = vec3(gl_ObjectToWorldEXT * vec4(position, 1.0));
 
     const vec3 normal = v0.normal.xyz * barycentrics.x + v1.normal.xyz * barycentrics.y + v2.normal.xyz * barycentrics.z;
-    const vec3 worldNormal = normalize(normal);
-    //const vec3 worldNormal = normalize(vec3(normal * gl_WorldToObjectEXT)); // Transforming the normal to world space
+    const vec3 worldNormal = normalize(vec3(normal * gl_WorldToObjectEXT)); // Transforming the normal to world space
 
     float totalLightAmount = 0.0;
     const float lightIntensity = 10.0;
@@ -110,12 +110,12 @@ void main()
                         0xFF, // cullMask
                         0, // sbtRecordOffset
                         0, // sbtRecordStride
-                        1, // missIndex
+                        1, // missIndex to use shadow miss shader
                         worldPos, // ray origin
                         0.001, // ray min range
                         lightDir, // ray direction
                         lightDistance, // ray max range
-                        1 // payload location
+                        1 // payload location to check if shadowed
             );
 
             if (isShadowed)
@@ -131,18 +131,18 @@ void main()
 
     uint baseColorTextureIndex = materialIndexBuffer.data[gl_PrimitiveID].baseColorTextureIndex;
     const vec3 baseColor = texture(textures[baseColorTextureIndex], texCoord).xyz;
-    payload.hitValue = baseColor * totalLightAmount + baseColor * ambient;
+    payload.hitValue = baseColor * totalLightAmount * payload.attenuation + baseColor * ambient;
 
     // Reflection
     const uint metallicRoughnessTextureIndex = materialIndexBuffer.data[gl_PrimitiveID].metallicRoughnessTextureIndex;
     const float metallic = texture(textures[metallicRoughnessTextureIndex], texCoord).b;
     if (metallic > 0.1) // Not very realistic but works in this case
     {
-        payload.hitValue *= (1.0 - metallic);
+        const float reflectAmount = materialIndexBuffer.data[gl_PrimitiveID].reflectiveness * metallic;
+        payload.attenuation *= reflectAmount;
+        payload.hitValue *= (1.0 - payload.attenuation);
         payload.done = 0;
         payload.rayOrigin = worldPos;
-        payload.rayDir = vec3(0, 1, 0);
-        // Should use world normal but it crashes for some reason
-        payload.rayDir = reflect(gl_WorldRayDirectionEXT, vec3(0, 1, 0));
+        payload.rayDir = reflect(gl_WorldRayDirectionEXT, worldNormal);
     }
 }

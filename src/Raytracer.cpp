@@ -32,9 +32,9 @@ const std::array<glm::vec4, 4> c_lightPositions{
 
 struct MaterialInfo
 {
-    int baseColorTextureIndex;
-    int metallicRoughnessTextureIndex;
-    int normalTextureIndex;
+    int baseColorTextureIndex = -1;
+    int metallicRoughnessTextureIndex = -1;
+    int normalTextureIndex = -1;
     float reflectiveness;
 };
 
@@ -1404,7 +1404,11 @@ void Raytracer::updateMaterialIndexDescriptorSet()
             materialInfo[counter].baseColorTextureIndex = m_model->materials[primitive.material].baseColor;
             materialInfo[counter].normalTextureIndex = m_model->materials[primitive.material].normalImage;
             materialInfo[counter].metallicRoughnessTextureIndex = m_model->materials[primitive.material].metallicRoughnessImage;
-            materialInfo[counter].reflectiveness = 0.0f;
+            materialInfo[counter].reflectiveness = 0.3f;
+
+            // For some materials there's no normal or metallicRoughess, just use some image in that case to avoid crashes
+            materialInfo[counter].normalTextureIndex = std::max(materialInfo[counter].normalTextureIndex, 0);
+            materialInfo[counter].metallicRoughnessTextureIndex = std::max(materialInfo[counter].metallicRoughnessTextureIndex, 0);
             ++counter;
         }
     }
