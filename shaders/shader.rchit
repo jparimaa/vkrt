@@ -1,14 +1,17 @@
 #version 460
+
 #extension GL_EXT_ray_tracing : require
 #extension GL_EXT_nonuniform_qualifier : enable
-
-#define M_PI 3.1415926535897932384626433832795
 
 hitAttributeEXT vec2 attribs;
 
 layout(location = 0) rayPayloadInEXT Payload
 {
-    vec3 directColor;
+    vec3 hitValue;
+    int done;
+    int depth;
+    vec3 rayOrigin;
+    vec3 rayDir;
 }
 payload;
 
@@ -77,11 +80,18 @@ void main()
     const vec3 worldPos = vec3(gl_ObjectToWorldEXT * vec4(position, 1.0));
 
     const vec3 normal = v0.normal.xyz * barycentrics.x + v1.normal.xyz * barycentrics.y + v2.normal.xyz * barycentrics.z;
-    const vec3 worldNormal = normalize(vec3(normal * gl_WorldToObjectEXT)); // Transforming the normal to world space
+    const vec3 worldNormal = normalize(normal);
+    //const vec3 worldNormal = normalize(vec3(normal * gl_WorldToObjectEXT)); // Transforming the normal to world space
 
     float totalLightAmount = 0.0;
     const float lightIntensity = 10.0;
 
+    const uint flags = //
+        gl_RayFlagsTerminateOnFirstHitEXT | // Terminate on first hit, no need to go further
+        gl_RayFlagsOpaqueEXT | // Will not call the any hit shader, so all objects will be opaque
+        gl_RayFlagsSkipClosestHitShaderEXT; // Will not invoke the hit shader, only the miss shader
+
+    // Light + shadow
     for (int i = 0; i < 4; ++i)
     {
         const vec3 lightVec = commonBuffer.lightPositions[i].xyz - worldPos;
@@ -94,11 +104,6 @@ void main()
         float shadowMultiplier = 1.0;
         if (dot(worldNormal, lightDir) > 0)
         {
-            const vec3 origin = gl_WorldRayOriginEXT + gl_WorldRayDirectionEXT * gl_HitTEXT;
-            const uint flags = //
-                gl_RayFlagsTerminateOnFirstHitEXT | // Terminate on first hit, no need to go further
-                gl_RayFlagsOpaqueEXT | // Will not call the any hit shader, so all objects will be opaque
-                gl_RayFlagsSkipClosestHitShaderEXT; // Will not invoke the hit shader, only the miss shader
             isShadowed = true;
             traceRayEXT(topLevelAS, // acceleration structure
                         flags, // rayFlags
@@ -106,11 +111,11 @@ void main()
                         0, // sbtRecordOffset
                         0, // sbtRecordStride
                         1, // missIndex
-                        origin, // ray origin
+                        worldPos, // ray origin
                         0.001, // ray min range
                         lightDir, // ray direction
                         lightDistance, // ray max range
-                        1 // payload (location = 1)
+                        1 // payload location
             );
 
             if (isShadowed)
@@ -125,9 +130,19 @@ void main()
     const float ambient = 0.1;
 
     uint baseColorTextureIndex = materialIndexBuffer.data[gl_PrimitiveID].baseColorTextureIndex;
-
     const vec3 baseColor = texture(textures[baseColorTextureIndex], texCoord).xyz;
-    payload.directColor = baseColor * totalLightAmount + baseColor * ambient;
+    payload.hitValue = baseColor * totalLightAmount + baseColor * ambient;
 
-    return;
+    // Reflection
+    const uint metallicRoughnessTextureIndex = materialIndexBuffer.data[gl_PrimitiveID].metallicRoughnessTextureIndex;
+    const float metallic = texture(textures[metallicRoughnessTextureIndex], texCoord).b;
+    if (metallic > 0.1) // Not very realistic but works in this case
+    {
+        payload.hitValue *= (1.0 - metallic);
+        payload.done = 0;
+        payload.rayOrigin = worldPos;
+        payload.rayDir = vec3(0, 1, 0);
+        // Should use world normal but it crashes for some reason
+        payload.rayDir = reflect(gl_WorldRayDirectionEXT, vec3(0, 1, 0));
+    }
 }

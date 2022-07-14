@@ -1390,33 +1390,33 @@ void Raytracer::updateMaterialIndexDescriptorSet()
     writeIndexBuffer.pBufferInfo = &bufferInfo;
     writeIndexBuffer.pTexelBufferView = NULL;
 
-    std::vector<VkWriteDescriptorSet> writeDescriptorSets{writeIndexBuffer};
+    const std::vector<VkWriteDescriptorSet> writeDescriptorSets{writeIndexBuffer};
 
     vkUpdateDescriptorSets(m_device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
 
     // Copy data
-    std::vector<MaterialInfo> materialIndices(m_triangleCount);
+    std::vector<MaterialInfo> materialInfo(m_triangleCount);
     size_t counter = 0;
     for (const Model::Primitive& primitive : m_model->primitives)
     {
         for (size_t i = 0; i < primitive.indices.size() / 3; ++i)
         {
-            materialIndices[counter].baseColorTextureIndex = m_model->materials[primitive.material].baseColor;
-            materialIndices[counter].normalTextureIndex = m_model->materials[primitive.material].normalImage;
-            materialIndices[counter].metallicRoughnessTextureIndex = m_model->materials[primitive.material].metallicRoughnessImage;
-            materialIndices[counter].reflectiveness = 0.3f;
+            materialInfo[counter].baseColorTextureIndex = m_model->materials[primitive.material].baseColor;
+            materialInfo[counter].normalTextureIndex = m_model->materials[primitive.material].normalImage;
+            materialInfo[counter].metallicRoughnessTextureIndex = m_model->materials[primitive.material].metallicRoughnessImage;
+            materialInfo[counter].reflectiveness = 0.0f;
             ++counter;
         }
     }
-    CHECK(counter == materialIndices.size());
+    CHECK(counter == materialInfo.size());
 
     VkBufferCopy copyRegion{};
     copyRegion.srcOffset = 0;
     copyRegion.dstOffset = 0;
-    copyRegion.size = materialIndices.size() * sizeof(materialIndices[0]);
+    copyRegion.size = materialInfo.size() * sizeof(materialInfo[0]);
 
     const VkPhysicalDevice physicalDevice = m_context.getPhysicalDevice();
-    StagingBuffer stagingBuffer = createStagingBuffer(m_device, physicalDevice, materialIndices.data(), copyRegion.size);
+    StagingBuffer stagingBuffer = createStagingBuffer(m_device, physicalDevice, materialInfo.data(), copyRegion.size);
 
     const SingleTimeCommand command = beginSingleTimeCommands(m_context.getGraphicsCommandPool(), m_device);
     vkCmdCopyBuffer(command.commandBuffer, stagingBuffer.buffer, m_materialIndexBuffer, 1, &copyRegion);

@@ -3,11 +3,15 @@
 
 layout(location = 0) rayPayloadInEXT Payload
 {
-    vec3 directColor;
+    vec3 hitValue;
+    int done;
+    int depth;
+    vec3 rayOrigin;
+    vec3 rayDir;
 }
 payload;
 
 void main()
 {
-    payload.directColor = vec3(0.0, 0.0, 0.2);
+    payload.hitValue = vec3(0.0, 0.0, 0.2);
 }
