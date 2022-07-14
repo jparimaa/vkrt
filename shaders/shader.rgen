@@ -5,15 +5,7 @@
 
 layout(location = 0) rayPayloadEXT Payload
 {
-    vec3 rayOrigin;
-    vec3 rayDirection;
-    vec3 previousNormal;
-
     vec3 directColor;
-    vec3 indirectColor;
-    int rayDepth;
-
-    int rayActive;
 }
 payload;
 
@@ -41,8 +33,6 @@ void main()
     const vec4 origin = commonBuffer.viewInverse * vec4(0, 0, 0, 1);
     const vec4 target = commonBuffer.projInverse * vec4(uvNorm.x, uvNorm.y, 1, 1);
     const vec4 direction = commonBuffer.viewInverse * vec4(normalize(target.xyz), 0);
-
-    payload.rayActive = 1;
 
     traceRayEXT(
         topLevelAS, // TLAS

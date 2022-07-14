@@ -24,10 +24,10 @@ struct UniformBufferInfo
 };
 
 const std::array<glm::vec4, 4> c_lightPositions{
-    glm::vec4{6.0f, 4.0f, 0.0f, 0.0f}, //
-    glm::vec4{2.0f, 4.0f, 0.0f, 0.0f}, //
+    glm::vec4{6.0f, 6.0f, 0.0f, 0.0f}, //
+    glm::vec4{2.0f, 5.0f, 0.0f, 0.0f}, //
     glm::vec4{-2.0f, 4.0f, 0.0f, 0.0f}, //
-    glm::vec4{-6.0f, 4.0f, 0.0f, 0.0f} //
+    glm::vec4{-6.0f, 3.0f, 0.0f, 0.0f} //
 };
 
 struct MaterialInfo

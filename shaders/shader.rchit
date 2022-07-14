@@ -8,17 +8,11 @@ hitAttributeEXT vec2 attribs;
 
 layout(location = 0) rayPayloadInEXT Payload
 {
-    vec3 rayOrigin;
-    vec3 rayDirection;
-    vec3 previousNormal;
     vec3 directColor;
-    vec3 indirectColor;
-    int rayDepth;
-    int rayActive;
 }
 payload;
 
-layout(location = 1) rayPayloadEXT bool isShadow;
+layout(location = 1) rayPayloadEXT bool isShadowed;
 
 layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
 layout(binding = 1, set = 0) uniform CommonUniformBuffer
@@ -71,8 +65,6 @@ layout(set = 2, binding = 0) uniform sampler2D textures[];
 
 void main()
 {
-    payload.rayActive = 0;
-
     const uvec4 index = indexBuffer.data[gl_PrimitiveID];
     const Vertex v0 = vertexBuffer.data[index.x];
     const Vertex v1 = vertexBuffer.data[index.y];
@@ -85,7 +77,7 @@ void main()
     const vec3 worldPos = vec3(gl_ObjectToWorldEXT * vec4(position, 1.0));
 
     const vec3 normal = v0.normal.xyz * barycentrics.x + v1.normal.xyz * barycentrics.y + v2.normal.xyz * barycentrics.z;
-    const vec3 worldNrm = normalize(vec3(normal * gl_WorldToObjectEXT)); // Transforming the normal to world space
+    const vec3 worldNormal = normalize(vec3(normal * gl_WorldToObjectEXT)); // Transforming the normal to world space
 
     float totalLightAmount = 0.0;
     const float lightIntensity = 10.0;
@@ -96,9 +88,38 @@ void main()
         const float lightDistance = length(lightVec);
         const vec3 lightDir = normalize(lightVec);
 
-        const float diffuse = clamp(dot(worldNrm, lightDir), 0, 1);
+        const float diffuse = clamp(dot(worldNormal, lightDir), 0, 1);
         const float lightPower = lightIntensity / (lightDistance * lightDistance);
-        totalLightAmount += diffuse * lightPower;
+
+        float shadowMultiplier = 1.0;
+        if (dot(worldNormal, lightDir) > 0)
+        {
+            const vec3 origin = gl_WorldRayOriginEXT + gl_WorldRayDirectionEXT * gl_HitTEXT;
+            const uint flags = //
+                gl_RayFlagsTerminateOnFirstHitEXT | // Terminate on first hit, no need to go further
+                gl_RayFlagsOpaqueEXT | // Will not call the any hit shader, so all objects will be opaque
+                gl_RayFlagsSkipClosestHitShaderEXT; // Will not invoke the hit shader, only the miss shader
+            isShadowed = true;
+            traceRayEXT(topLevelAS, // acceleration structure
+                        flags, // rayFlags
+                        0xFF, // cullMask
+                        0, // sbtRecordOffset
+                        0, // sbtRecordStride
+                        1, // missIndex
+                        origin, // ray origin
+                        0.001, // ray min range
+                        lightDir, // ray direction
+                        lightDistance, // ray max range
+                        1 // payload (location = 1)
+            );
+
+            if (isShadowed)
+            {
+                shadowMultiplier = 0.3;
+            }
+        }
+
+        totalLightAmount += diffuse * lightPower * shadowMultiplier;
     }
 
     const float ambient = 0.1;
