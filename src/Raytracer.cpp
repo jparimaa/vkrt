@@ -1404,7 +1404,7 @@ void Raytracer::updateMaterialIndexDescriptorSet()
             materialInfo[counter].baseColorTextureIndex = m_model->materials[primitive.material].baseColor;
             materialInfo[counter].normalTextureIndex = m_model->materials[primitive.material].normalImage;
             materialInfo[counter].metallicRoughnessTextureIndex = m_model->materials[primitive.material].metallicRoughnessImage;
-            materialInfo[counter].reflectiveness = 0.3f;
+            materialInfo[counter].reflectiveness = 0.5f;
 
             // For some materials there's no normal or metallicRoughess, just use some image in that case to avoid crashes
             materialInfo[counter].normalTextureIndex = std::max(materialInfo[counter].normalTextureIndex, 0);

@@ -67,6 +67,14 @@ materialIndexBuffer;
 
 layout(set = 2, binding = 0) uniform sampler2D textures[];
 
+mat3 getTBN(vec3 normal, vec3 tangent, mat3 M)
+{
+    const vec3 N = normal;
+    const vec3 T = normalize(mat3(M) * tangent);
+    const vec3 B = cross(T, N);
+    return mat3(T, B, N);
+}
+
 void main()
 {
     const uvec4 index = indexBuffer.data[gl_PrimitiveID];
@@ -75,13 +83,20 @@ void main()
     const Vertex v2 = vertexBuffer.data[index.z];
 
     const vec3 barycentrics = vec3(1.0f - attribs.x - attribs.y, attribs.x, attribs.y);
-    const vec2 texCoord = v0.uv.xy * barycentrics.x + v1.uv.xy * barycentrics.y + v2.uv.xy * barycentrics.z;
+    const vec2 uv = v0.uv.xy * barycentrics.x + v1.uv.xy * barycentrics.y + v2.uv.xy * barycentrics.z;
 
     const vec3 position = v0.position.xyz * barycentrics.x + v1.position.xyz * barycentrics.y + v2.position.xyz * barycentrics.z;
     const vec3 worldPos = vec3(gl_ObjectToWorldEXT * vec4(position, 1.0));
 
     const vec3 normal = v0.normal.xyz * barycentrics.x + v1.normal.xyz * barycentrics.y + v2.normal.xyz * barycentrics.z;
     const vec3 worldNormal = normalize(vec3(normal * gl_WorldToObjectEXT)); // Transforming the normal to world space
+
+    const vec3 tangent = v0.tangent.xyz * barycentrics.x + v1.tangent.xyz * barycentrics.y + v2.tangent.xyz * barycentrics.z;
+
+    const mat3 TBN = getTBN(worldNormal, tangent, mat3(1.0));
+    uint normalTextureIndex = materialIndexBuffer.data[gl_PrimitiveID].normalTextureIndex;
+    const vec3 mapNormal = texture(textures[normalTextureIndex], uv).xyz;
+    const vec3 perturbedNormal = normalize(TBN * normalize(mapNormal * 2.0 - vec3(1.0)));
 
     float totalLightAmount = 0.0;
     const float lightIntensity = 10.0;
@@ -98,11 +113,11 @@ void main()
         const float lightDistance = length(lightVec);
         const vec3 lightDir = normalize(lightVec);
 
-        const float diffuse = clamp(dot(worldNormal, lightDir), 0, 1);
+        const float diffuse = clamp(dot(perturbedNormal, lightDir), 0, 1);
         const float lightPower = lightIntensity / (lightDistance * lightDistance);
 
         float shadowMultiplier = 1.0;
-        if (dot(worldNormal, lightDir) > 0)
+        if (dot(perturbedNormal, lightDir) > 0)
         {
             isShadowed = true;
             traceRayEXT(topLevelAS, // acceleration structure
@@ -130,12 +145,12 @@ void main()
     const float ambient = 0.1;
 
     uint baseColorTextureIndex = materialIndexBuffer.data[gl_PrimitiveID].baseColorTextureIndex;
-    const vec3 baseColor = texture(textures[baseColorTextureIndex], texCoord).xyz;
+    const vec3 baseColor = texture(textures[baseColorTextureIndex], uv).xyz;
     payload.hitValue = baseColor * totalLightAmount * payload.attenuation + baseColor * ambient;
 
     // Reflection
     const uint metallicRoughnessTextureIndex = materialIndexBuffer.data[gl_PrimitiveID].metallicRoughnessTextureIndex;
-    const float metallic = texture(textures[metallicRoughnessTextureIndex], texCoord).b;
+    const float metallic = texture(textures[metallicRoughnessTextureIndex], uv).b;
     if (metallic > 0.1) // Not very realistic but works in this case
     {
         const float reflectAmount = materialIndexBuffer.data[gl_PrimitiveID].reflectiveness * metallic;
@@ -143,6 +158,6 @@ void main()
         payload.hitValue *= (1.0 - payload.attenuation);
         payload.done = 0;
         payload.rayOrigin = worldPos;
-        payload.rayDir = reflect(gl_WorldRayDirectionEXT, worldNormal);
+        payload.rayDir = reflect(gl_WorldRayDirectionEXT, perturbedNormal);
     }
 }
