@@ -19,11 +19,9 @@ public:
 private:
     struct PrimitiveInfo
     {
-        uint64_t vertexOffset;
-        Model::Index firstVertex;
         Model::Index maxVertex;
-        uint32_t vertexCount;
         uint32_t triangleCount;
+        uint64_t indexByteOffset;
     };
 
     bool update(uint32_t imageIndex);

@@ -649,7 +649,8 @@ void Raytracer::createVertexAndIndexBuffer()
     std::vector<Model::Index> indices(indexCount);
     int indexCounter = 0;
     Model::Index indexCounterOffset = 0;
-    size_t vertexOffset = 0;
+    size_t vertexByteOffset = 0;
+    size_t indexByteOffset = 0;
 
     for (const Model::Primitive& primitive : m_model->primitives)
     {
@@ -657,25 +658,24 @@ void Raytracer::createVertexAndIndexBuffer()
         for (Model::Index index : primitive.indices)
         {
             indices[indexCounter] = indexCounterOffset + index;
-            highestIndex = std::max(highestIndex, indices[indexCounter]);
+            highestIndex = std::max(highestIndex, index);
             ++indexCounter;
         }
 
         m_primitiveInfos.push_back(
             PrimitiveInfo{
-                vertexOffset, //
-                indexCounterOffset + primitive.indices[0], //
                 highestIndex, //
-                ui32Size(primitive.vertices), //
-                ui32Size(primitive.indices) / 3 //
+                ui32Size(primitive.indices) / 3, //
+                indexByteOffset //
             } //
         );
 
         indexCounterOffset += primitive.vertices.size();
 
         const size_t vertexSize = sizeof(Model::Vertex) * primitive.vertices.size();
-        std::memcpy(&vertexData[vertexOffset], primitive.vertices.data(), vertexSize);
-        vertexOffset += vertexSize;
+        std::memcpy(&vertexData[vertexByteOffset], primitive.vertices.data(), vertexSize);
+        vertexByteOffset += vertexSize;
+        indexByteOffset += sizeof(Model::Index) * primitive.indices.size();
     }
 
     m_triangleCount = indices.size() / 3;
@@ -1063,8 +1063,6 @@ void Raytracer::createBLAS()
     triangleCounts.reserve(m_primitiveInfos.size());
     std::vector<VkAccelerationStructureBuildRangeInfoKHR> rangeInfos;
     rangeInfos.reserve(m_primitiveInfos.size());
-    uint64_t primitiveOffset = 0;
-    uint32_t firstVertex = 0;
 
     for (const PrimitiveInfo& info : m_primitiveInfos)
     {
@@ -1091,13 +1089,10 @@ void Raytracer::createBLAS()
 
         VkAccelerationStructureBuildRangeInfoKHR blasBuildRangeInfo{};
         blasBuildRangeInfo.primitiveCount = info.triangleCount;
-        blasBuildRangeInfo.primitiveOffset = primitiveOffset;
-        blasBuildRangeInfo.firstVertex = info.firstVertex;
+        blasBuildRangeInfo.primitiveOffset = info.indexByteOffset;
+        blasBuildRangeInfo.firstVertex = 0;
         blasBuildRangeInfo.transformOffset = 0;
         rangeInfos.push_back(blasBuildRangeInfo);
-
-        primitiveOffset += info.vertexOffset;
-        firstVertex += info.vertexCount;
     }
 
     VkAccelerationStructureBuildGeometryInfoKHR blasBuildGeometryInfo{};
