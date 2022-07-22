@@ -29,6 +29,7 @@ layout(binding = 4, set = 0, rgba32f) uniform image2D image;
 
 void main()
 {
+    return;
     const vec2 pixelCenter = vec2(gl_LaunchIDEXT.xy) + vec2(0.5);
     const vec2 inUV = pixelCenter / vec2(gl_LaunchSizeEXT.xy);
     const vec2 uvNorm = inUV * 2.0 - 1.0;

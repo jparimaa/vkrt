@@ -20,7 +20,8 @@ private:
     struct PrimitiveInfo
     {
         uint64_t vertexOffset;
-        uint64_t indexOffset;
+        Model::Index firstVertex;
+        Model::Index maxVertex;
         uint32_t vertexCount;
         uint32_t triangleCount;
     };

@@ -116,6 +116,7 @@ std::vector<Model::Primitive> loadPrimitives(const tinygltf::Model& model)
             }
         }
     }
+    primitives.resize(4);
     return primitives;
 }
 
