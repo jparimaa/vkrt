@@ -35,7 +35,7 @@ struct MaterialInfo
     int baseColorTextureIndex = -1;
     int metallicRoughnessTextureIndex = -1;
     int normalTextureIndex = -1;
-    float reflectiveness;
+    int indexBufferOffset = 0;
 };
 
 const size_t c_uniformBufferSize = sizeof(UniformBufferInfo);
@@ -648,20 +648,34 @@ void Raytracer::createVertexAndIndexBuffer()
     const int indexCount = m_indexDataSize / sizeof(Model::Index);
     std::vector<Model::Index> indices(indexCount);
     int indexCounter = 0;
-    Model::Index indexOffset = 0;
-    size_t vertexOffset = 0;
+    Model::Index indexCounterOffset = 0;
+    size_t vertexByteOffset = 0;
+    size_t indexByteOffset = 0;
+
     for (const Model::Primitive& primitive : m_model->primitives)
     {
+        Model::Index highestIndex = 0;
         for (Model::Index index : primitive.indices)
         {
-            indices[indexCounter] = indexOffset + index;
+            indices[indexCounter] = indexCounterOffset + index;
+            highestIndex = std::max(highestIndex, index);
             ++indexCounter;
         }
-        indexOffset += primitive.vertices.size();
+
+        m_primitiveInfos.push_back(
+            PrimitiveInfo{
+                highestIndex, //
+                ui32Size(primitive.indices) / 3, //
+                indexByteOffset //
+            } //
+        );
+
+        indexCounterOffset += primitive.vertices.size();
 
         const size_t vertexSize = sizeof(Model::Vertex) * primitive.vertices.size();
-        std::memcpy(&vertexData[vertexOffset], primitive.vertices.data(), vertexSize);
-        vertexOffset += vertexSize;
+        std::memcpy(&vertexData[vertexByteOffset], primitive.vertices.data(), vertexSize);
+        vertexByteOffset += vertexSize;
+        indexByteOffset += sizeof(Model::Index) * primitive.indices.size();
     }
 
     m_triangleCount = indices.size() / 3;
@@ -1004,7 +1018,7 @@ void Raytracer::createCommonBuffer()
 
 void Raytracer::createMaterialIndexBuffer()
 {
-    const uint64_t bufferSize = sizeof(MaterialInfo) * m_triangleCount;
+    const uint64_t bufferSize = sizeof(MaterialInfo) * m_model->primitives.size();
 
     m_materialIndexBuffer = createBuffer(m_device, bufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
     m_materialIndexBufferMemory = allocateAndBindMemory(m_device, m_context.getPhysicalDevice(), m_materialIndexBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
@@ -1043,23 +1057,43 @@ void Raytracer::createBLAS()
     const VkDeviceAddress vertexBufferDeviceAddress = m_pvkGetBufferDeviceAddressKHR(m_device, &vertexBufferDeviceAddressInfo);
     const VkDeviceAddress indexBufferDeviceAddress = m_pvkGetBufferDeviceAddressKHR(m_device, &indexBufferDeviceAddressInfo);
 
-    VkAccelerationStructureGeometryDataKHR geometryData{};
-    geometryData.triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
-    geometryData.triangles.pNext = NULL;
-    geometryData.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
-    geometryData.triangles.vertexData = VkDeviceOrHostAddressConstKHR{vertexBufferDeviceAddress};
-    geometryData.triangles.vertexStride = sizeof(Model::Vertex);
-    geometryData.triangles.maxVertex = m_vertexDataSize / sizeof(Model::Vertex);
-    geometryData.triangles.indexType = VK_INDEX_TYPE_UINT32;
-    geometryData.triangles.indexData = VkDeviceOrHostAddressConstKHR{indexBufferDeviceAddress};
-    geometryData.triangles.transformData = VkDeviceOrHostAddressConstKHR{0};
+    std::vector<VkAccelerationStructureGeometryKHR> geometries;
+    geometries.reserve(m_primitiveInfos.size());
+    std::vector<uint32_t> triangleCounts;
+    triangleCounts.reserve(m_primitiveInfos.size());
+    std::vector<VkAccelerationStructureBuildRangeInfoKHR> rangeInfos;
+    rangeInfos.reserve(m_primitiveInfos.size());
 
-    VkAccelerationStructureGeometryKHR geometry{};
-    geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
-    geometry.pNext = NULL;
-    geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
-    geometry.geometry = geometryData;
-    geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+    for (const PrimitiveInfo& info : m_primitiveInfos)
+    {
+        VkAccelerationStructureGeometryDataKHR geometryData{};
+        geometryData.triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
+        geometryData.triangles.pNext = NULL;
+        geometryData.triangles.vertexFormat = VK_FORMAT_R32G32B32_SFLOAT;
+        geometryData.triangles.vertexData = VkDeviceOrHostAddressConstKHR{vertexBufferDeviceAddress};
+        geometryData.triangles.vertexStride = sizeof(Model::Vertex);
+        geometryData.triangles.maxVertex = info.maxVertex;
+        geometryData.triangles.indexType = VK_INDEX_TYPE_UINT32;
+        geometryData.triangles.indexData = VkDeviceOrHostAddressConstKHR{indexBufferDeviceAddress};
+        geometryData.triangles.transformData = VkDeviceOrHostAddressConstKHR{0};
+
+        VkAccelerationStructureGeometryKHR geometry{};
+        geometry.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_KHR;
+        geometry.pNext = NULL;
+        geometry.geometryType = VK_GEOMETRY_TYPE_TRIANGLES_KHR;
+        geometry.geometry = geometryData;
+        geometry.flags = VK_GEOMETRY_OPAQUE_BIT_KHR;
+
+        geometries.push_back(geometry);
+        triangleCounts.push_back(info.triangleCount);
+
+        VkAccelerationStructureBuildRangeInfoKHR blasBuildRangeInfo{};
+        blasBuildRangeInfo.primitiveCount = info.triangleCount;
+        blasBuildRangeInfo.primitiveOffset = info.indexByteOffset;
+        blasBuildRangeInfo.firstVertex = 0;
+        blasBuildRangeInfo.transformOffset = 0;
+        rangeInfos.push_back(blasBuildRangeInfo);
+    }
 
     VkAccelerationStructureBuildGeometryInfoKHR blasBuildGeometryInfo{};
     blasBuildGeometryInfo.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR;
@@ -1069,8 +1103,8 @@ void Raytracer::createBLAS()
     blasBuildGeometryInfo.mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR;
     blasBuildGeometryInfo.srcAccelerationStructure = VK_NULL_HANDLE;
     blasBuildGeometryInfo.dstAccelerationStructure = VK_NULL_HANDLE;
-    blasBuildGeometryInfo.geometryCount = 1;
-    blasBuildGeometryInfo.pGeometries = &geometry;
+    blasBuildGeometryInfo.geometryCount = ui32Size(geometries);
+    blasBuildGeometryInfo.pGeometries = geometries.data();
     blasBuildGeometryInfo.ppGeometries = NULL;
     blasBuildGeometryInfo.scratchData = VkDeviceOrHostAddressKHR{0};
 
@@ -1080,9 +1114,6 @@ void Raytracer::createBLAS()
     blasBuildSizesInfo.accelerationStructureSize = 0;
     blasBuildSizesInfo.updateScratchSize = 0;
     blasBuildSizesInfo.buildScratchSize = 0;
-
-    const uint32_t triangleCount = static_cast<uint32_t>(m_indexDataSize / sizeof(Model::Index) / 3);
-    const std::vector<uint32_t> triangleCounts{triangleCount};
 
     const VkAccelerationStructureBuildTypeKHR buildType = VK_ACCELERATION_STRUCTURE_BUILD_TYPE_DEVICE_KHR;
     m_pvkGetAccelerationStructureBuildSizesKHR(m_device, buildType, &blasBuildGeometryInfo, triangleCounts.data(), &blasBuildSizesInfo);
@@ -1129,15 +1160,9 @@ void Raytracer::createBLAS()
     blasBuildGeometryInfo.dstAccelerationStructure = m_blas;
     blasBuildGeometryInfo.scratchData.deviceAddress = blasScratchBufferDeviceAddress;
 
-    VkAccelerationStructureBuildRangeInfoKHR blasBuildRangeInfo{};
-    blasBuildRangeInfo.primitiveCount = triangleCount;
-    blasBuildRangeInfo.primitiveOffset = 0;
-    blasBuildRangeInfo.firstVertex = 0;
-    blasBuildRangeInfo.transformOffset = 0;
-
     const SingleTimeCommand command = beginSingleTimeCommands(m_context.getGraphicsCommandPool(), m_device);
     const VkCommandBuffer& cb = command.commandBuffer;
-    const VkAccelerationStructureBuildRangeInfoKHR* blasBuildRangeInfos = &blasBuildRangeInfo;
+    const VkAccelerationStructureBuildRangeInfoKHR* blasBuildRangeInfos = rangeInfos.data();
     m_pvkCmdBuildAccelerationStructuresKHR(cb, 1, &blasBuildGeometryInfo, &blasBuildRangeInfos);
     endSingleTimeCommands(m_context.getGraphicsQueue(), command);
 
@@ -1395,22 +1420,22 @@ void Raytracer::updateMaterialIndexDescriptorSet()
     vkUpdateDescriptorSets(m_device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
 
     // Copy data
-    std::vector<MaterialInfo> materialInfo(m_triangleCount);
+    std::vector<MaterialInfo> materialInfo(m_model->primitives.size());
     size_t counter = 0;
+    int indexBufferOffset = 0;
     for (const Model::Primitive& primitive : m_model->primitives)
     {
-        for (size_t i = 0; i < primitive.indices.size() / 3; ++i)
-        {
-            materialInfo[counter].baseColorTextureIndex = m_model->materials[primitive.material].baseColor;
-            materialInfo[counter].normalTextureIndex = m_model->materials[primitive.material].normalImage;
-            materialInfo[counter].metallicRoughnessTextureIndex = m_model->materials[primitive.material].metallicRoughnessImage;
-            materialInfo[counter].reflectiveness = 0.5f;
+        materialInfo[counter].baseColorTextureIndex = m_model->materials[primitive.material].baseColor;
+        materialInfo[counter].normalTextureIndex = m_model->materials[primitive.material].normalImage;
+        materialInfo[counter].metallicRoughnessTextureIndex = m_model->materials[primitive.material].metallicRoughnessImage;
+        materialInfo[counter].indexBufferOffset = indexBufferOffset;
 
-            // For some materials there's no normal or metallicRoughess, just use some image in that case to avoid crashes
-            materialInfo[counter].normalTextureIndex = std::max(materialInfo[counter].normalTextureIndex, 0);
-            materialInfo[counter].metallicRoughnessTextureIndex = std::max(materialInfo[counter].metallicRoughnessTextureIndex, 0);
-            ++counter;
-        }
+        indexBufferOffset += primitive.indices.size() / 3;
+
+        // For some materials there's no normal or metallicRoughess, just use some image in that case to avoid crashes
+        materialInfo[counter].normalTextureIndex = std::max(materialInfo[counter].normalTextureIndex, 0);
+        materialInfo[counter].metallicRoughnessTextureIndex = std::max(materialInfo[counter].metallicRoughnessTextureIndex, 0);
+        ++counter;
     }
     CHECK(counter == materialInfo.size());
 

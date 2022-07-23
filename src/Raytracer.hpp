@@ -17,6 +17,13 @@ public:
     bool render();
 
 private:
+    struct PrimitiveInfo
+    {
+        Model::Index maxVertex;
+        uint32_t triangleCount;
+        uint64_t indexByteOffset;
+    };
+
     bool update(uint32_t imageIndex);
 
     void getFunctionPointers();
@@ -84,6 +91,7 @@ private:
     VkDeviceMemory m_indexBufferMemory;
     VkBuffer m_primitiveIndexBuffer;
     VkDeviceMemory m_primitiveIndexBufferMemory;
+    std::vector<PrimitiveInfo> m_primitiveInfos;
     size_t m_triangleCount;
     size_t m_vertexDataSize;
     size_t m_indexDataSize;
