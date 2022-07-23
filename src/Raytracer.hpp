@@ -17,7 +17,7 @@ public:
     bool render();
 
 private:
-    struct PrimitiveInfo
+    struct SubmeshIndexInfo
     {
         Model::Index maxVertex;
         uint32_t triangleCount;
@@ -89,10 +89,7 @@ private:
     VkDeviceMemory m_vertexBufferMemory;
     VkBuffer m_indexBuffer;
     VkDeviceMemory m_indexBufferMemory;
-    VkBuffer m_primitiveIndexBuffer;
-    VkDeviceMemory m_primitiveIndexBufferMemory;
-    std::vector<PrimitiveInfo> m_primitiveInfos;
-    size_t m_triangleCount;
+    std::vector<SubmeshIndexInfo> m_submeshIndexInfos;
     size_t m_vertexDataSize;
     size_t m_indexDataSize;
     VkBuffer m_commonBuffer;

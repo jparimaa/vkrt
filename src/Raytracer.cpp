@@ -30,7 +30,7 @@ const std::array<glm::vec4, 4> c_lightPositions{
     glm::vec4{-6.0f, 3.0f, 0.0f, 0.0f} //
 };
 
-struct MaterialInfo
+struct SubmeshInfo
 {
     int baseColorTextureIndex = -1;
     int metallicRoughnessTextureIndex = -1;
@@ -88,7 +88,6 @@ Raytracer::~Raytracer()
 
     destroyBufferAndFreeMemory(m_device, m_vertexBuffer, m_vertexBufferMemory);
     destroyBufferAndFreeMemory(m_device, m_indexBuffer, m_indexBufferMemory);
-    destroyBufferAndFreeMemory(m_device, m_primitiveIndexBuffer, m_primitiveIndexBufferMemory);
     destroyBufferAndFreeMemory(m_device, m_commonBuffer, m_commonBufferMemory);
     destroyBufferAndFreeMemory(m_device, m_materialIndexBuffer, m_materialIndexBufferMemory);
     destroyBufferAndFreeMemory(m_device, m_tlasBuffer, m_tlasMemory);
@@ -640,6 +639,20 @@ void Raytracer::createMipmaps(VkImage image, uint32_t mipLevels, glm::uvec2 imag
 
 void Raytracer::createVertexAndIndexBuffer()
 {
+    /*
+    Create two big buffers: one for vertices and one for indices.
+
+    Vertices can be copied one after another.
+
+    Indices need to have an index offset because every submesh starts indexing from 0.
+    So if first submesh has indices 0,1,2 and second also has 0,1,2,
+    the second submesh indices need to be updated to have 3,4,5 so it maps correctly to one
+    big continuous vertex buffer.
+
+    Also for each submesh, gather highest index, triangle (primitive) count and index byte offset
+    because BLAS creation needs them.
+    */
+
     m_vertexDataSize = m_model->vertexBufferSizeInBytes;
     m_indexDataSize = m_model->indexBufferSizeInBytes;
     std::vector<uint8_t> vertexData(m_vertexDataSize, 0);
@@ -652,43 +665,30 @@ void Raytracer::createVertexAndIndexBuffer()
     size_t vertexByteOffset = 0;
     size_t indexByteOffset = 0;
 
-    for (const Model::Primitive& primitive : m_model->primitives)
+    for (const Model::Submesh& submesh : m_model->submeshes)
     {
         Model::Index highestIndex = 0;
-        for (Model::Index index : primitive.indices)
+        for (Model::Index index : submesh.indices)
         {
             indices[indexCounter] = indexCounterOffset + index;
             highestIndex = std::max(highestIndex, index);
             ++indexCounter;
         }
 
-        m_primitiveInfos.push_back(
-            PrimitiveInfo{
+        m_submeshIndexInfos.push_back(
+            SubmeshIndexInfo{
                 highestIndex, //
-                ui32Size(primitive.indices) / 3, //
+                ui32Size(submesh.indices) / 3, //
                 indexByteOffset //
             } //
         );
 
-        indexCounterOffset += primitive.vertices.size();
+        indexCounterOffset += submesh.vertices.size();
 
-        const size_t vertexSize = sizeof(Model::Vertex) * primitive.vertices.size();
-        std::memcpy(&vertexData[vertexByteOffset], primitive.vertices.data(), vertexSize);
+        const size_t vertexSize = sizeof(Model::Vertex) * submesh.vertices.size();
+        std::memcpy(&vertexData[vertexByteOffset], submesh.vertices.data(), vertexSize);
         vertexByteOffset += vertexSize;
-        indexByteOffset += sizeof(Model::Index) * primitive.indices.size();
-    }
-
-    m_triangleCount = indices.size() / 3;
-
-    std::vector<glm::uvec4> primitiveIndices(m_triangleCount);
-    size_t counter = 0;
-    for (size_t i = 0; i < indices.size(); i += 3)
-    {
-        primitiveIndices[counter].x = indices[i + 0];
-        primitiveIndices[counter].y = indices[i + 1];
-        primitiveIndices[counter].z = indices[i + 2];
-        primitiveIndices[counter].w = 0;
-        ++counter;
+        indexByteOffset += sizeof(Model::Index) * submesh.indices.size();
     }
 
     CHECK(m_indexDataSize == (sizeof(Model::Index) * indices.size()));
@@ -733,23 +733,6 @@ void Raytracer::createVertexAndIndexBuffer()
 
         const SingleTimeCommand command = beginSingleTimeCommands(m_context.getGraphicsCommandPool(), m_device);
         vkCmdCopyBuffer(command.commandBuffer, stagingBuffer.buffer, m_indexBuffer, 1, &copyRegion);
-        endSingleTimeCommands(m_context.getGraphicsQueue(), command);
-
-        releaseStagingBuffer(m_device, stagingBuffer);
-    }
-    { // Primitive Index
-        const uint64_t primitiveIndicesSize = primitiveIndices.size() * sizeof(primitiveIndices[0]);
-        StagingBuffer stagingBuffer = createStagingBuffer(m_device, physicalDevice, primitiveIndices.data(), primitiveIndicesSize);
-
-        m_primitiveIndexBuffer = createBuffer(m_device, primitiveIndicesSize, usage);
-        m_primitiveIndexBufferMemory = allocateAndBindMemory(m_device, physicalDevice, m_primitiveIndexBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        DebugMarker::setObjectName(VK_OBJECT_TYPE_BUFFER, m_primitiveIndexBuffer, "Buffer - Index");
-        DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_primitiveIndexBufferMemory, "Memory - Index buffer");
-
-        copyRegion.size = primitiveIndicesSize;
-
-        const SingleTimeCommand command = beginSingleTimeCommands(m_context.getGraphicsCommandPool(), m_device);
-        vkCmdCopyBuffer(command.commandBuffer, stagingBuffer.buffer, m_primitiveIndexBuffer, 1, &copyRegion);
         endSingleTimeCommands(m_context.getGraphicsQueue(), command);
 
         releaseStagingBuffer(m_device, stagingBuffer);
@@ -1018,7 +1001,7 @@ void Raytracer::createCommonBuffer()
 
 void Raytracer::createMaterialIndexBuffer()
 {
-    const uint64_t bufferSize = sizeof(MaterialInfo) * m_model->primitives.size();
+    const uint64_t bufferSize = sizeof(SubmeshInfo) * m_model->submeshes.size();
 
     m_materialIndexBuffer = createBuffer(m_device, bufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
     m_materialIndexBufferMemory = allocateAndBindMemory(m_device, m_context.getPhysicalDevice(), m_materialIndexBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
@@ -1057,14 +1040,16 @@ void Raytracer::createBLAS()
     const VkDeviceAddress vertexBufferDeviceAddress = m_pvkGetBufferDeviceAddressKHR(m_device, &vertexBufferDeviceAddressInfo);
     const VkDeviceAddress indexBufferDeviceAddress = m_pvkGetBufferDeviceAddressKHR(m_device, &indexBufferDeviceAddressInfo);
 
+    const size_t submeshCount = m_submeshIndexInfos.size();
     std::vector<VkAccelerationStructureGeometryKHR> geometries;
-    geometries.reserve(m_primitiveInfos.size());
     std::vector<uint32_t> triangleCounts;
-    triangleCounts.reserve(m_primitiveInfos.size());
     std::vector<VkAccelerationStructureBuildRangeInfoKHR> rangeInfos;
-    rangeInfos.reserve(m_primitiveInfos.size());
+    geometries.reserve(submeshCount);
+    triangleCounts.reserve(submeshCount);
+    rangeInfos.reserve(submeshCount);
 
-    for (const PrimitiveInfo& info : m_primitiveInfos)
+    // Create one BLAS that has multiple triangle geometries.
+    for (const SubmeshIndexInfo& info : m_submeshIndexInfos)
     {
         VkAccelerationStructureGeometryDataKHR geometryData{};
         geometryData.triangles.sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_GEOMETRY_TRIANGLES_DATA_KHR;
@@ -1310,7 +1295,7 @@ void Raytracer::updateCommonDescriptorSets()
     uniformDescriptorInfo.range = VK_WHOLE_SIZE;
 
     VkDescriptorBufferInfo indexDescriptorInfo{};
-    indexDescriptorInfo.buffer = m_primitiveIndexBuffer;
+    indexDescriptorInfo.buffer = m_indexBuffer;
     indexDescriptorInfo.offset = 0;
     indexDescriptorInfo.range = VK_WHOLE_SIZE;
 
@@ -1419,33 +1404,33 @@ void Raytracer::updateMaterialIndexDescriptorSet()
 
     vkUpdateDescriptorSets(m_device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
 
-    // Copy data
-    std::vector<MaterialInfo> materialInfo(m_model->primitives.size());
-    size_t counter = 0;
+    // For each submesh texture indices are stored.
+    // Also index buffer offset is needed, because indices are gathered in one big buffer,
+    // so we need to know where each submesh's indices start.
+    std::vector<SubmeshInfo> submeshInfos(m_model->submeshes.size());
     int indexBufferOffset = 0;
-    for (const Model::Primitive& primitive : m_model->primitives)
+    for (size_t i = 0; i < m_model->submeshes.size(); ++i)
     {
-        materialInfo[counter].baseColorTextureIndex = m_model->materials[primitive.material].baseColor;
-        materialInfo[counter].normalTextureIndex = m_model->materials[primitive.material].normalImage;
-        materialInfo[counter].metallicRoughnessTextureIndex = m_model->materials[primitive.material].metallicRoughnessImage;
-        materialInfo[counter].indexBufferOffset = indexBufferOffset;
+        const Model::Submesh& submesh = m_model->submeshes[i];
+        submeshInfos[i].baseColorTextureIndex = m_model->materials[submesh.material].baseColor;
+        submeshInfos[i].normalTextureIndex = m_model->materials[submesh.material].normalImage;
+        submeshInfos[i].metallicRoughnessTextureIndex = m_model->materials[submesh.material].metallicRoughnessImage;
+        submeshInfos[i].indexBufferOffset = indexBufferOffset;
 
-        indexBufferOffset += primitive.indices.size() / 3;
+        indexBufferOffset += submesh.indices.size() / 3;
 
         // For some materials there's no normal or metallicRoughess, just use some image in that case to avoid crashes
-        materialInfo[counter].normalTextureIndex = std::max(materialInfo[counter].normalTextureIndex, 0);
-        materialInfo[counter].metallicRoughnessTextureIndex = std::max(materialInfo[counter].metallicRoughnessTextureIndex, 0);
-        ++counter;
+        submeshInfos[i].normalTextureIndex = std::max(submeshInfos[i].normalTextureIndex, 0);
+        submeshInfos[i].metallicRoughnessTextureIndex = std::max(submeshInfos[i].metallicRoughnessTextureIndex, 0);
     }
-    CHECK(counter == materialInfo.size());
 
     VkBufferCopy copyRegion{};
     copyRegion.srcOffset = 0;
     copyRegion.dstOffset = 0;
-    copyRegion.size = materialInfo.size() * sizeof(materialInfo[0]);
+    copyRegion.size = submeshInfos.size() * sizeof(submeshInfos[0]);
 
     const VkPhysicalDevice physicalDevice = m_context.getPhysicalDevice();
-    StagingBuffer stagingBuffer = createStagingBuffer(m_device, physicalDevice, materialInfo.data(), copyRegion.size);
+    StagingBuffer stagingBuffer = createStagingBuffer(m_device, physicalDevice, submeshInfos.data(), copyRegion.size);
 
     const SingleTimeCommand command = beginSingleTimeCommands(m_context.getGraphicsCommandPool(), m_device);
     vkCmdCopyBuffer(command.commandBuffer, stagingBuffer.buffer, m_materialIndexBuffer, 1, &copyRegion);

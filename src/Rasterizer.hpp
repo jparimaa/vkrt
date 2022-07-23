@@ -9,11 +9,11 @@
 #include <unordered_map>
 #include <memory>
 
-class Renderer final
+class Rasterizer final
 {
 public:
-    Renderer(Context& context);
-    ~Renderer();
+    Rasterizer(Context& context);
+    ~Rasterizer();
 
     bool render();
 

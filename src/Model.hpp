@@ -35,7 +35,7 @@ public:
 
     using Index = uint32_t;
 
-    struct Primitive
+    struct Submesh
     {
         std::vector<Vertex> vertices;
         std::vector<Index> indices;
@@ -45,7 +45,7 @@ public:
     Model(const std::string& filename);
     ~Model() {}
 
-    std::vector<Primitive> primitives;
+    std::vector<Submesh> submeshes;
     std::vector<Material> materials;
     std::vector<Image> images;
 

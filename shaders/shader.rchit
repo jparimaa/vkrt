@@ -31,6 +31,7 @@ layout(binding = 1, set = 0) uniform CommonUniformBuffer
 }
 commonBuffer;
 
+// Todo: could fix vertex alignment so there's no need to have everything as vec4
 struct Vertex
 {
     vec4 position;
@@ -47,10 +48,16 @@ struct MaterialInfo
     int indexBufferOffset;
 };
 
-// todo: better alignment
-layout(set = 0, binding = 2) buffer IndexBuffer
+struct IndexInfo
 {
-    uvec4 data[];
+    uint x;
+    uint y;
+    uint z;
+};
+
+layout(std430, set = 0, binding = 2) buffer IndexBuffer
+{
+    IndexInfo data[];
 }
 indexBuffer;
 
@@ -79,7 +86,7 @@ mat3 getTBN(vec3 normal, vec3 tangent, mat3 M)
 void main()
 {
     const int indexBufferOffset = materialIndexBuffer.data[gl_GeometryIndexEXT].indexBufferOffset;
-    const uvec4 index = indexBuffer.data[indexBufferOffset + gl_PrimitiveID];
+    const IndexInfo index = indexBuffer.data[indexBufferOffset + gl_PrimitiveID];
     const Vertex v0 = vertexBuffer.data[index.x];
     const Vertex v1 = vertexBuffer.data[index.y];
     const Vertex v2 = vertexBuffer.data[index.z];

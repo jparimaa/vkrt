@@ -45,21 +45,21 @@ int getSourceOrMinusOne(const std::vector<tinygltf::Texture>& textures, int inde
     return textures[index].source;
 }
 
-std::vector<Model::Primitive> loadPrimitives(const tinygltf::Model& model)
+std::vector<Model::Submesh> loadSubmeshes(const tinygltf::Model& model)
 {
-    std::vector<Model::Primitive> primitives(model.meshes[0].primitives.size());
+    std::vector<Model::Submesh> submeshes(model.meshes[0].primitives.size());
     for (size_t i = 0; i < model.meshes[0].primitives.size(); ++i)
     {
         const tinygltf::Primitive& gltfPrimitive = model.meshes[0].primitives[i];
 
-        primitives[i].material = gltfPrimitive.material;
+        submeshes[i].material = gltfPrimitive.material;
 
         { // Indices
             const tinygltf::Accessor& accessor = model.accessors[gltfPrimitive.indices];
             const tinygltf::BufferView& bufferView = model.bufferViews[accessor.bufferView];
             const tinygltf::Buffer& buffer = model.buffers[bufferView.buffer];
 
-            std::vector<uint32_t>& indices = primitives[i].indices;
+            std::vector<uint32_t>& indices = submeshes[i].indices;
             indices.resize(accessor.count);
 
             const size_t elementSizeInBytes = getAccessorElementSizeInBytes(accessor);
@@ -84,7 +84,7 @@ std::vector<Model::Primitive> loadPrimitives(const tinygltf::Model& model)
             const tinygltf::BufferView& bufferView = model.bufferViews[accessor.bufferView];
             const tinygltf::Buffer& buffer = model.buffers[bufferView.buffer];
 
-            std::vector<Model::Vertex>& vertices = primitives[i].vertices;
+            std::vector<Model::Vertex>& vertices = submeshes[i].vertices;
             vertices.resize(accessor.count);
 
             const size_t elementSizeInBytes = getAccessorElementSizeInBytes(accessor);
@@ -116,7 +116,7 @@ std::vector<Model::Primitive> loadPrimitives(const tinygltf::Model& model)
             }
         }
     }
-    return primitives;
+    return submeshes;
 }
 
 std::vector<Model::Material> loadMaterials(const tinygltf::Model& gltfModel)
@@ -177,14 +177,14 @@ Model::Model(const std::string& filename)
     CHECK(modelLoaded);
     CHECK(!gltfModel.meshes.empty());
 
-    primitives = loadPrimitives(gltfModel);
+    submeshes = loadSubmeshes(gltfModel);
     materials = loadMaterials(gltfModel);
     images = loadImages(gltfModel);
 
-    for (const Model::Primitive& primitive : primitives)
+    for (const Model::Submesh& submesh : submeshes)
     {
-        vertexBufferSizeInBytes += sizeof(Model::Vertex) * primitive.vertices.size();
-        indexBufferSizeInBytes += sizeof(Model::Index) * primitive.indices.size();
+        vertexBufferSizeInBytes += sizeof(Model::Vertex) * submesh.vertices.size();
+        indexBufferSizeInBytes += sizeof(Model::Index) * submesh.indices.size();
     }
 
     printf("Completed\n");

@@ -1,11 +1,11 @@
 #include "Context.hpp"
-#include "Renderer.hpp"
+#include "Rasterizer.hpp"
 #include "Raytracer.hpp"
 
 int main(void)
 {
     Context context;
-    //Renderer graphicsApp(context);
+    //Rasterizer graphicsApp(context);
     Raytracer graphicsApp(context);
 
     bool running = true;

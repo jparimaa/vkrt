@@ -1,4 +1,4 @@
-#include "Renderer.hpp"
+#include "Rasterizer.hpp"
 #include "VulkanUtils.hpp"
 #include "Utils.hpp"
 #include "DebugMarker.hpp"
@@ -17,7 +17,7 @@ const VkImageSubresourceRange c_defaultSubresourceRance{VK_IMAGE_ASPECT_COLOR_BI
 const VkSampleCountFlagBits c_msaaSampleCount = VK_SAMPLE_COUNT_8_BIT;
 } // namespace
 
-Renderer::Renderer(Context& context) :
+Rasterizer::Rasterizer(Context& context) :
     m_context(context),
     m_device(context.getDevice()),
     m_lastRenderTime(std::chrono::high_resolution_clock::now())
@@ -46,7 +46,7 @@ Renderer::Renderer(Context& context) :
     initializeGUI();
 }
 
-Renderer::~Renderer()
+Rasterizer::~Rasterizer()
 {
     vkDeviceWaitIdle(m_device);
 
@@ -97,7 +97,7 @@ Renderer::~Renderer()
     vkDestroyRenderPass(m_device, m_renderPass, nullptr);
 }
 
-bool Renderer::render()
+bool Rasterizer::render()
 {
     const uint32_t imageIndex = m_context.acquireNextSwapchainImage();
 
@@ -169,7 +169,7 @@ bool Renderer::render()
     return true;
 }
 
-bool Renderer::update(uint32_t imageIndex)
+bool Rasterizer::update(uint32_t imageIndex)
 {
     bool running = m_context.update();
     if (!running)
@@ -194,23 +194,23 @@ bool Renderer::update(uint32_t imageIndex)
     return true;
 }
 
-void Renderer::loadModel()
+void Rasterizer::loadModel()
 {
     m_model.reset(new Model("sponza/Sponza.gltf"));
 }
 
-void Renderer::releaseModel()
+void Rasterizer::releaseModel()
 {
     m_model.reset();
 }
 
-void Renderer::setupCamera()
+void Rasterizer::setupCamera()
 {
     m_camera.setPosition(glm::vec3{-4.0f, 2.0f, -0.2f});
     m_camera.setRotation(glm::vec3{0.0f, 1.51f, 0.0f});
 }
 
-void Renderer::updateCamera(double deltaTime)
+void Rasterizer::updateCamera(double deltaTime)
 {
     std::vector<Context::KeyEvent> keyEvents = m_context.getKeyEvents();
     for (const Context::KeyEvent& keyEvent : keyEvents)
@@ -263,7 +263,7 @@ void Renderer::updateCamera(double deltaTime)
     }
 }
 
-void Renderer::createRenderPass()
+void Rasterizer::createRenderPass()
 {
     VkAttachmentReference colorAttachmentRef{};
     colorAttachmentRef.attachment = 0;
@@ -337,7 +337,7 @@ void Renderer::createRenderPass()
     DebugMarker::setObjectName(VK_OBJECT_TYPE_RENDER_PASS, m_renderPass, "Render pass - Main");
 }
 
-void Renderer::createMsaaColorImage()
+void Rasterizer::createMsaaColorImage()
 {
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -385,7 +385,7 @@ void Renderer::createMsaaColorImage()
     DebugMarker::setObjectName(VK_OBJECT_TYPE_IMAGE_VIEW, m_msaaColorImageView, "Image view - MSAA color");
 }
 
-void Renderer::createDepthImage()
+void Rasterizer::createDepthImage()
 {
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -433,7 +433,7 @@ void Renderer::createDepthImage()
     DebugMarker::setObjectName(VK_OBJECT_TYPE_IMAGE_VIEW, m_depthImageView, "Image view - MSAA depth");
 }
 
-void Renderer::createSwapchainImageViews()
+void Rasterizer::createSwapchainImageViews()
 {
     const std::vector<VkImage>& swapchainImages = m_context.getSwapchainImages();
 
@@ -455,7 +455,7 @@ void Renderer::createSwapchainImageViews()
     }
 }
 
-void Renderer::createFramebuffers()
+void Rasterizer::createFramebuffers()
 {
     m_framebuffers.resize(m_swapchainImageViews.size());
 
@@ -477,7 +477,7 @@ void Renderer::createFramebuffers()
     }
 }
 
-void Renderer::createSampler()
+void Rasterizer::createSampler()
 {
     VkSamplerCreateInfo samplerInfo{};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -501,7 +501,7 @@ void Renderer::createSampler()
     DebugMarker::setObjectName(VK_OBJECT_TYPE_SAMPLER, m_sampler, "Sampler - Main");
 }
 
-void Renderer::createTextures()
+void Rasterizer::createTextures()
 {
     const std::vector<Model::Image>& images = m_model->images;
     const size_t imageCount = images.size();
@@ -613,7 +613,7 @@ void Renderer::createTextures()
     }
 }
 
-void Renderer::createMipmaps(VkImage image, uint32_t mipLevels, glm::uvec2 imageSize)
+void Rasterizer::createMipmaps(VkImage image, uint32_t mipLevels, glm::uvec2 imageSize)
 {
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -683,7 +683,7 @@ void Renderer::createMipmaps(VkImage image, uint32_t mipLevels, glm::uvec2 image
     endSingleTimeCommands(m_context.getGraphicsQueue(), command);
 }
 
-void Renderer::createUboDescriptorSetLayouts()
+void Rasterizer::createUboDescriptorSetLayouts()
 {
     VkDescriptorSetLayoutBinding uboLayoutBinding{};
     uboLayoutBinding.binding = 0;
@@ -702,7 +702,7 @@ void Renderer::createUboDescriptorSetLayouts()
     DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, m_uboDescriptorSetLayout, "Desc set layout - UBO");
 }
 
-void Renderer::createTexturesDescriptorSetLayouts()
+void Rasterizer::createTexturesDescriptorSetLayouts()
 {
     const uint32_t imageCount = 3;
     std::vector<VkDescriptorSetLayoutBinding> bindings(imageCount);
@@ -725,7 +725,7 @@ void Renderer::createTexturesDescriptorSetLayouts()
     DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, m_texturesDescriptorSetLayout, "Desc set layout - Texture");
 }
 
-void Renderer::createGraphicsPipeline()
+void Rasterizer::createGraphicsPipeline()
 {
     const std::array<VkDescriptorSetLayout, 2> descriptorSetLayouts{m_uboDescriptorSetLayout, m_texturesDescriptorSetLayout};
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
@@ -734,7 +734,7 @@ void Renderer::createGraphicsPipeline()
     pipelineLayoutInfo.pSetLayouts = descriptorSetLayouts.data();
 
     VK_CHECK(vkCreatePipelineLayout(m_device, &pipelineLayoutInfo, nullptr, &m_pipelineLayout));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_PIPELINE_LAYOUT, m_pipelineLayout, "Pipeline layout - Renderer");
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_PIPELINE_LAYOUT, m_pipelineLayout, "Pipeline layout - Rasterizer");
 
     VkVertexInputBindingDescription vertexDescription{};
     vertexDescription.binding = 0;
@@ -882,7 +882,7 @@ void Renderer::createGraphicsPipeline()
     pipelineInfo.basePipelineIndex = -1;
 
     VK_CHECK(vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_graphicsPipeline));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_PIPELINE, m_graphicsPipeline, "Pipeline - Renderer");
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_PIPELINE, m_graphicsPipeline, "Pipeline - Rasterizer");
 
     for (const VkPipelineShaderStageCreateInfo& stage : shaderStages)
     {
@@ -890,7 +890,7 @@ void Renderer::createGraphicsPipeline()
     }
 }
 
-void Renderer::createDescriptorPool()
+void Rasterizer::createDescriptorPool()
 {
     const uint32_t swapchainLength = static_cast<uint32_t>(m_context.getSwapchainImages().size());
     const uint32_t numSetsForGUI = 1;
@@ -913,10 +913,10 @@ void Renderer::createDescriptorPool()
     poolInfo.maxSets = maxSets;
 
     VK_CHECK(vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_descriptorPool));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_POOL, m_descriptorPool, "Descriptor pool - Renderer");
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_DESCRIPTOR_POOL, m_descriptorPool, "Descriptor pool - Rasterizer");
 }
 
-void Renderer::createUboDescriptorSets()
+void Rasterizer::createUboDescriptorSets()
 {
     const uint32_t swapchainLength = static_cast<uint32_t>(m_context.getSwapchainImages().size());
     m_uboDescriptorSets.resize(swapchainLength);
@@ -936,7 +936,7 @@ void Renderer::createUboDescriptorSets()
     }
 }
 
-void Renderer::createTextureDescriptorSet()
+void Rasterizer::createTextureDescriptorSet()
 {
     const size_t materialCount = m_model->materials.size();
     m_texturesDescriptorSets.resize(materialCount);
@@ -955,7 +955,7 @@ void Renderer::createTextureDescriptorSet()
     }
 }
 
-void Renderer::createUniformBuffer()
+void Rasterizer::createUniformBuffer()
 {
     const VkMemoryPropertyFlags memoryProperties = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
     const uint64_t bufferSize = c_uniformBufferSize * m_context.getSwapchainImages().size();
@@ -967,7 +967,7 @@ void Renderer::createUniformBuffer()
     bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VK_CHECK(vkCreateBuffer(m_device, &bufferInfo, nullptr, &m_uniformBuffer));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_BUFFER, m_uniformBuffer, "Buffer - Renderer uniform buffer");
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_BUFFER, m_uniformBuffer, "Buffer - Rasterizer uniform buffer");
 
     VkMemoryRequirements memRequirements;
     vkGetBufferMemoryRequirements(m_device, m_uniformBuffer, &memRequirements);
@@ -981,12 +981,12 @@ void Renderer::createUniformBuffer()
     allocInfo.memoryTypeIndex = memoryTypeResult.typeIndex;
 
     VK_CHECK(vkAllocateMemory(m_device, &allocInfo, nullptr, &m_uniformBufferMemory));
-    DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_uniformBufferMemory, "Memory - Renderer uniform buffer");
+    DebugMarker::setObjectName(VK_OBJECT_TYPE_DEVICE_MEMORY, m_uniformBufferMemory, "Memory - Rasterizer uniform buffer");
 
     VK_CHECK(vkBindBufferMemory(m_device, m_uniformBuffer, m_uniformBufferMemory, 0));
 }
 
-void Renderer::updateUboDescriptorSets()
+void Rasterizer::updateUboDescriptorSets()
 {
     VkDescriptorBufferInfo bufferInfo{};
     bufferInfo.buffer = m_uniformBuffer;
@@ -1009,7 +1009,7 @@ void Renderer::updateUboDescriptorSets()
     vkUpdateDescriptorSets(m_device, ui32Size(descriptorWrites), descriptorWrites.data(), 0, nullptr);
 }
 
-void Renderer::updateTexturesDescriptorSets()
+void Rasterizer::updateTexturesDescriptorSets()
 {
     const std::vector<Model::Material>& materials = m_model->materials;
     const size_t materialCount = m_model->materials.size();
@@ -1045,18 +1045,18 @@ void Renderer::updateTexturesDescriptorSets()
     vkUpdateDescriptorSets(m_device, ui32Size(descriptorWrites), descriptorWrites.data(), 0, nullptr);
 }
 
-void Renderer::createVertexAndIndexBuffer()
+void Rasterizer::createVertexAndIndexBuffer()
 {
-    m_primitiveInfos.resize(m_model->primitives.size());
+    m_primitiveInfos.resize(m_model->submeshes.size());
     const uint64_t bufferSize = m_model->vertexBufferSizeInBytes + m_model->indexBufferSizeInBytes;
     std::vector<uint8_t> data(bufferSize, 0);
     size_t vertexOffset = 0;
     size_t indexOffset = m_model->vertexBufferSizeInBytes;
     int32_t vertexCountOffset = 0;
     uint32_t firstIndex = 0;
-    for (size_t i = 0; i < m_model->primitives.size(); ++i)
+    for (size_t i = 0; i < m_model->submeshes.size(); ++i)
     {
-        const Model::Primitive& primitive = m_model->primitives[i];
+        const Model::Submesh& primitive = m_model->submeshes[i];
 
         m_primitiveInfos[i].indexCount = ui32Size(primitive.indices);
         m_primitiveInfos[i].vertexCountOffset = vertexCountOffset;
@@ -1121,7 +1121,7 @@ void Renderer::createVertexAndIndexBuffer()
     releaseStagingBuffer(m_device, stagingBuffer);
 }
 
-void Renderer::allocateCommandBuffers()
+void Rasterizer::allocateCommandBuffers()
 {
     m_commandBuffers.resize(m_framebuffers.size());
 
@@ -1134,7 +1134,7 @@ void Renderer::allocateCommandBuffers()
     VK_CHECK(vkAllocateCommandBuffers(m_device, &allocInfo, m_commandBuffers.data()));
 }
 
-void Renderer::initializeGUI()
+void Rasterizer::initializeGUI()
 {
     const QueueFamilyIndices indices = getQueueFamilies(m_context.getPhysicalDevice(), m_context.getSurface());
 
