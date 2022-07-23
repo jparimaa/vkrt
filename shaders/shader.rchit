@@ -44,7 +44,7 @@ struct MaterialInfo
     int baseColorTextureIndex;
     int metallicRoughnessTextureIndex;
     int normalTextureIndex;
-    float reflectiveness;
+    int indexBufferOffset;
 };
 
 // todo: better alignment
@@ -53,6 +53,7 @@ layout(set = 0, binding = 2) buffer IndexBuffer
     uvec4 data[];
 }
 indexBuffer;
+
 layout(set = 0, binding = 3) buffer VertexBuffer
 {
     Vertex data[];
@@ -77,7 +78,8 @@ mat3 getTBN(vec3 normal, vec3 tangent, mat3 M)
 
 void main()
 {
-    const uvec4 index = indexBuffer.data[gl_PrimitiveID];
+    const int indexBufferOffset = materialIndexBuffer.data[gl_GeometryIndexEXT].indexBufferOffset;
+    const uvec4 index = indexBuffer.data[indexBufferOffset + gl_PrimitiveID];
     const Vertex v0 = vertexBuffer.data[index.x];
     const Vertex v1 = vertexBuffer.data[index.y];
     const Vertex v2 = vertexBuffer.data[index.z];
@@ -94,7 +96,7 @@ void main()
     const vec3 tangent = v0.tangent.xyz * barycentrics.x + v1.tangent.xyz * barycentrics.y + v2.tangent.xyz * barycentrics.z;
 
     const mat3 TBN = getTBN(worldNormal, tangent, mat3(1.0));
-    uint normalTextureIndex = materialIndexBuffer.data[gl_PrimitiveID].normalTextureIndex;
+    uint normalTextureIndex = materialIndexBuffer.data[gl_GeometryIndexEXT].normalTextureIndex;
     const vec3 mapNormal = texture(textures[normalTextureIndex], uv).xyz;
     const vec3 perturbedNormal = normalize(TBN * normalize(mapNormal * 2.0 - vec3(1.0)));
 
@@ -144,16 +146,16 @@ void main()
 
     const float ambient = 0.1;
 
-    uint baseColorTextureIndex = materialIndexBuffer.data[gl_PrimitiveID].baseColorTextureIndex;
+    uint baseColorTextureIndex = materialIndexBuffer.data[gl_GeometryIndexEXT].baseColorTextureIndex;
     const vec3 baseColor = texture(textures[baseColorTextureIndex], uv).xyz;
     payload.hitValue = baseColor * totalLightAmount * payload.attenuation + baseColor * ambient;
 
     // Reflection
-    const uint metallicRoughnessTextureIndex = materialIndexBuffer.data[gl_PrimitiveID].metallicRoughnessTextureIndex;
+    const uint metallicRoughnessTextureIndex = materialIndexBuffer.data[gl_GeometryIndexEXT].metallicRoughnessTextureIndex;
     const float metallic = texture(textures[metallicRoughnessTextureIndex], uv).b;
     if (metallic > 0.1) // Not very realistic but works in this case
     {
-        const float reflectAmount = materialIndexBuffer.data[gl_PrimitiveID].reflectiveness * metallic;
+        const float reflectAmount = 0.5f * metallic;
         payload.attenuation *= reflectAmount;
         payload.hitValue *= (1.0 - payload.attenuation);
         payload.done = 0;

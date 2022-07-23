@@ -35,7 +35,7 @@ struct MaterialInfo
     int baseColorTextureIndex = -1;
     int metallicRoughnessTextureIndex = -1;
     int normalTextureIndex = -1;
-    float reflectiveness;
+    int indexBufferOffset = 0;
 };
 
 const size_t c_uniformBufferSize = sizeof(UniformBufferInfo);
@@ -1018,7 +1018,7 @@ void Raytracer::createCommonBuffer()
 
 void Raytracer::createMaterialIndexBuffer()
 {
-    const uint64_t bufferSize = sizeof(MaterialInfo) * m_triangleCount;
+    const uint64_t bufferSize = sizeof(MaterialInfo) * m_model->primitives.size();
 
     m_materialIndexBuffer = createBuffer(m_device, bufferSize, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT);
     m_materialIndexBufferMemory = allocateAndBindMemory(m_device, m_context.getPhysicalDevice(), m_materialIndexBuffer, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
@@ -1420,22 +1420,22 @@ void Raytracer::updateMaterialIndexDescriptorSet()
     vkUpdateDescriptorSets(m_device, writeDescriptorSets.size(), writeDescriptorSets.data(), 0, NULL);
 
     // Copy data
-    std::vector<MaterialInfo> materialInfo(m_triangleCount);
+    std::vector<MaterialInfo> materialInfo(m_model->primitives.size());
     size_t counter = 0;
+    int indexBufferOffset = 0;
     for (const Model::Primitive& primitive : m_model->primitives)
     {
-        for (size_t i = 0; i < primitive.indices.size() / 3; ++i)
-        {
-            materialInfo[counter].baseColorTextureIndex = m_model->materials[primitive.material].baseColor;
-            materialInfo[counter].normalTextureIndex = m_model->materials[primitive.material].normalImage;
-            materialInfo[counter].metallicRoughnessTextureIndex = m_model->materials[primitive.material].metallicRoughnessImage;
-            materialInfo[counter].reflectiveness = 0.5f;
+        materialInfo[counter].baseColorTextureIndex = m_model->materials[primitive.material].baseColor;
+        materialInfo[counter].normalTextureIndex = m_model->materials[primitive.material].normalImage;
+        materialInfo[counter].metallicRoughnessTextureIndex = m_model->materials[primitive.material].metallicRoughnessImage;
+        materialInfo[counter].indexBufferOffset = indexBufferOffset;
 
-            // For some materials there's no normal or metallicRoughess, just use some image in that case to avoid crashes
-            materialInfo[counter].normalTextureIndex = std::max(materialInfo[counter].normalTextureIndex, 0);
-            materialInfo[counter].metallicRoughnessTextureIndex = std::max(materialInfo[counter].metallicRoughnessTextureIndex, 0);
-            ++counter;
-        }
+        indexBufferOffset += primitive.indices.size() / 3;
+
+        // For some materials there's no normal or metallicRoughess, just use some image in that case to avoid crashes
+        materialInfo[counter].normalTextureIndex = std::max(materialInfo[counter].normalTextureIndex, 0);
+        materialInfo[counter].metallicRoughnessTextureIndex = std::max(materialInfo[counter].metallicRoughnessTextureIndex, 0);
+        ++counter;
     }
     CHECK(counter == materialInfo.size());
 
