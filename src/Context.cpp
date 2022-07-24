@@ -417,6 +417,11 @@ void Context::createSwapchain()
     CHECK(queriedImageCount == c_swapchainImageCount);
     m_swapchainImages.resize(c_swapchainImageCount);
     vkGetSwapchainImagesKHR(m_device, m_swapchain, &queriedImageCount, m_swapchainImages.data());
+
+    for (size_t i = 0; i < m_swapchainImages.size(); ++i)
+    {
+        DebugMarker::setObjectName(VK_OBJECT_TYPE_IMAGE, m_swapchainImages[i], "Swapchain image " + std::to_string(i));
+    }
 }
 
 void Context::createCommandPools()

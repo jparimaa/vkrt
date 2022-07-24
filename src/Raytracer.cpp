@@ -167,8 +167,8 @@ bool Raytracer::render()
             swapchainLayoutBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
             swapchainLayoutBarrier.image = swapchainImages[imageIndex];
             swapchainLayoutBarrier.subresourceRange = c_defaultSubresourceRance;
-            swapchainLayoutBarrier.srcAccessMask = 0;
-            swapchainLayoutBarrier.dstAccessMask = 0;
+            swapchainLayoutBarrier.srcAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+            swapchainLayoutBarrier.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
 
             vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &swapchainLayoutBarrier);
 
@@ -186,6 +186,8 @@ bool Raytracer::render()
 
             swapchainLayoutBarrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
             swapchainLayoutBarrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+            swapchainLayoutBarrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+            swapchainLayoutBarrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
 
             vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, &swapchainLayoutBarrier);
         }
